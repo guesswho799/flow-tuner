@@ -19,6 +19,7 @@ tests:
 
 ## How to build
 ```console
+gcc -static test/main.c -o test/program
 mkdir build && cd build
 cmake .. && make -j16
 ./FlowTuner -i ../test/program -o outbinary
