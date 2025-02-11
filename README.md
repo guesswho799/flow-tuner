@@ -15,7 +15,7 @@ But lets say these 10 functions are placed one after another, the new icache mis
 
 ### Branch prediction showcase
 But functions call more than one function, we order functions based on the first dependency.<br>
-What if the first symbol the function calls is in a very unlikely branch (e.g. error propagation).<br>
+What if the first symbol the function calls is in a very unlikely branch (e.g. asserting on null argument).<br>
 Luckly, gcc is very good at branch predictions and places the most likely branch first.<br>
 Here is a simplified output of two compilations, one predicting exit and one predicting sleep.<br>
 ```c
