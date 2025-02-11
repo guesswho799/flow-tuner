@@ -1,5 +1,6 @@
 #pragma once
 
+#include "dependency.hpp"
 #include "elf_header.hpp"
 #include <capstone/capstone.h>
 #include <cstdint>
@@ -25,7 +26,7 @@ public:
               const std::vector<NamedSymbol> &static_symbols = {},
               const std::vector<ElfString> &strings = {});
   static int64_t get_address(const std::string &instruction_argument);
-  Dependencies get_dependencies(const Function &function,
+  void append_dependencies(DependencyMap& dependency_map, const Function &function,
                                 const std::vector<Function> &static_symbols);
 
 private:
@@ -48,13 +49,14 @@ private:
                                      uint64_t address);
   static uint64_t _hex_to_decimal(const std::string &number);
   static bool _is_hex_number(const std::string &number);
-  static bool _is_call_instruction(const std::string &s);
+  static bool _is_call(const std::string &s);
+  static bool _is_mov(const std::string &s);
   static bool _is_load_instruction(const std::string &s);
   static bool _is_relative_instruction(const std::string &s);
 
   static std::variant<Address, Function>
   _resolve_dependency(const std::vector<Function> &static_symbols,
-                      uint64_t address);
+                      Address address);
   static bool _is_jump(const std::string &instruction);
 
 private:

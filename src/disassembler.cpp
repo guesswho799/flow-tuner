@@ -72,12 +72,10 @@ Disassembler::_generate_comment(const std::string &operation,
   return "";
 }
 
-bool Disassembler::_is_absolute_instruction(
-    const std::string &instruction_operation,
-    const std::string &instruction_argument) {
-  if (_is_call_instruction(instruction_operation) or
-      _is_jump(instruction_operation))
-    return _is_hex_number(instruction_argument);
+bool Disassembler::_is_absolute_instruction(const std::string &operation,
+                                            const std::string &argument) {
+  if (_is_call(operation) or _is_jump(operation) or _is_mov(operation))
+    return _is_hex_number(argument);
   return false;
 }
 
@@ -125,7 +123,7 @@ std::string Disassembler::_resolve_string(const std::vector<ElfString> &strings,
 }
 
 int64_t Disassembler::get_address(const std::string &instruction_argument) {
-  const std::regex pattern(".*\\[rip *([\\+-]) *0x([0-9a-f]+)\\].*");
+  const std::regex pattern(".*\\[rip ([\\+-]) (0x[0-9a-f]+)\\]");
   std::smatch match;
   if (std::regex_match(instruction_argument, match, pattern)) {
     int64_t address = _hex_to_decimal(match[2].str());
@@ -138,26 +136,32 @@ int64_t Disassembler::get_address(const std::string &instruction_argument) {
 }
 
 uint64_t Disassembler::_hex_to_decimal(const std::string &number) {
+  const size_t index = number.find("0x");
   uint64_t result = 0;
   std::stringstream ss;
-  ss << std::hex << number;
+  ss << std::hex << number.substr(index);
   ss >> result;
   return result;
 }
 
 bool Disassembler::_is_hex_number(const std::string &s) {
-  if (!s.starts_with("0x"))
+  const size_t index = s.find("0x");
+  if (index == std::string::npos)
     return false;
 
-  constexpr int skip_prefix = 2;
+  const size_t skip_prefix = 2 + index;
   std::string::const_iterator it = s.begin() + skip_prefix;
   while (it != s.end() and std::isxdigit(*it))
     ++it;
   return !s.empty() && it == s.end();
 }
 
-bool Disassembler::_is_call_instruction(const std::string &s) {
+bool Disassembler::_is_call(const std::string &s) {
   return 0 == strncmp(s.c_str(), "call", 4);
+}
+
+bool Disassembler::_is_mov(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "mov", 3);
 }
 
 bool Disassembler::_is_load_instruction(const std::string &s) {
@@ -169,9 +173,9 @@ bool Disassembler::_is_relative_instruction(const std::string &s) {
   return std::regex_match(s, pattern);
 }
 
-Dependencies
-Disassembler::get_dependencies(const Function &function,
-                               const std::vector<Function> &static_symbols) {
+void Disassembler::append_dependencies(
+    DependencyMap &dependency_map, const Function &function,
+    const std::vector<Function> &static_symbols) {
   cs_insn *insn;
   const ssize_t count =
       cs_disasm(_handle, function.opcodes.data(), function.opcodes.size(),
@@ -179,7 +183,6 @@ Disassembler::get_dependencies(const Function &function,
   if (count < 0)
     throw Status::disassembler__parse_failed;
 
-  Dependencies result;
   auto buffer_iterator = function.opcodes.begin();
 
   for (int i = 0; i < count; i++) {
@@ -188,28 +191,34 @@ Disassembler::get_dependencies(const Function &function,
     const uint64_t address = insn[i].address;
     const std::string argument = insn[i].op_str;
     const std::string operation = insn[i].mnemonic;
+    const bool is_relative = _is_relative_instruction(argument);
+    const bool is_absolute = _is_absolute_instruction(operation, argument);
     Address target_address = 0;
 
-    if (address == 4202484)
-      breakpoint();
-
-    if (_is_relative_instruction(argument)) {
+    if (is_relative) {
       target_address = address + size + get_address(argument);
-    } else if (_is_absolute_instruction(operation, argument)) {
+
+    } else if (is_absolute) {
       target_address = _hex_to_decimal(argument);
     }
 
     if (target_address) {
       const std::variant<Address, Function> dependency =
           _resolve_dependency(static_symbols, target_address);
+      const bool is_function = std::holds_alternative<Function>(dependency);
+      const bool is_address = std::holds_alternative<Address>(dependency);
 
-      if (std::holds_alternative<Function>(dependency))
-        result.first.push_back(std::get<Function>(dependency));
-      if (std::holds_alternative<Address>(dependency)) {
+      if (is_function)
+        dependency_map.add_function_dependency(function,
+                                               std::get<Function>(dependency));
+      else if (is_address and is_relative) {
         const Address dependency_address = std::get<Address>(dependency);
-        if (dependency_address < function.address or
-            dependency_address > function.address + function.size)
-          result.second.push_back(dependency_address);
+        const bool is_outside_dependency =
+            dependency_address < function.address or
+            dependency_address > function.address + function.size;
+        if (is_outside_dependency) {
+          dependency_map.add_relative_dependency(function, dependency_address);
+        }
       }
     }
 
@@ -217,14 +226,13 @@ Disassembler::get_dependencies(const Function &function,
   }
 
   cs_free(insn, count);
-  return result;
 }
 
 void Disassembler::breakpoint() {}
 
 std::variant<Address, Function>
 Disassembler::_resolve_dependency(const std::vector<Function> &static_symbols,
-                                  uint64_t address) {
+                                  Address address) {
   for (const auto &function : static_symbols) {
     if (function.address == address)
       return function;

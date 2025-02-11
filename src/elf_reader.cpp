@@ -110,7 +110,7 @@ std::vector<NamedSymbol> ElfReader::get_non_file_symbols() const {
   return symbols;
 }
 
-NamedSymbol ElfReader::get_function(std::string name) const {
+NamedSymbol ElfReader::get_symbol(std::string name) const {
   const auto function_filter = [&](const NamedSymbol &symbol) {
     return symbol.type & SymbolType::function && symbol.name == name;
   };
@@ -120,6 +120,21 @@ NamedSymbol ElfReader::get_function(std::string name) const {
     throw CriticalException(Status::elf_header__function_not_found);
 
   return *iterator;
+}
+
+Function ElfReader::get_function(std::string name) const {
+  const auto function = get_symbol(name);
+  const uint64_t offset =
+      function.value + _sections[function.section_index].unloaded_offset -
+      _sections[function.section_index].loaded_virtual_address;
+  _file.seekg(static_cast<long>(offset));
+  std::vector<unsigned char> buffer(function.size);
+  _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
+
+  return {.name = function.name,
+          .address = function.value,
+          .size = function.size,
+          .opcodes = buffer};
 }
 
 std::vector<Function> ElfReader::get_functions() const {
@@ -136,7 +151,7 @@ std::vector<Function> ElfReader::get_functions() const {
   };
 
   std::vector<Function> functions{};
-  for (const auto &symbol : _static_symbols | //std::views::take(100) |
+  for (const auto &symbol : _static_symbols | // std::views::take(100) |
                                 std::views::filter(function_filter)) {
     const auto function_start = buffer.begin() + symbol.value - section_start;
     const auto function_end =
@@ -155,8 +170,7 @@ DependencyMap ElfReader::get_all_dependencies() const {
   Disassembler disassembler;
   const std::vector<Function> functions = get_functions();
   for (const auto &function : functions) {
-    result.emplace(function,
-                   disassembler.get_dependencies(function, functions));
+    disassembler.append_dependencies(result, function, functions);
   }
   return result;
 }
@@ -186,7 +200,7 @@ ElfReader::get_function_code(const NamedSymbol &function,
 
 std::vector<Disassembler::Line>
 ElfReader::get_function_code_by_name(std::string name) const {
-  return get_function_code(get_function(name), true);
+  return get_function_code(get_symbol(name), true);
 }
 
 // factories
