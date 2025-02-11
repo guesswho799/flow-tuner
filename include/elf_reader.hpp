@@ -34,7 +34,8 @@ public:
   NamedSection get_section(std::size_t section_index) const;
   size_t get_section_index(const std::string_view &section_name) const;
   std::vector<NamedSymbol> get_non_file_symbols() const;
-  NamedSymbol get_function(std::string name) const;
+  NamedSymbol get_symbol(std::string name) const;
+  Function get_function(std::string name) const;
   std::vector<Function> get_functions() const;
   std::vector<NamedSymbol>
   get_symbol_dependencies(const Function &function) const;

@@ -93,6 +93,7 @@ inline constexpr bool operator&(SymbolType x, SymbolType y) {
   return static_cast<int>(x) & static_cast<int>(y);
 }
 
+using Address = uint64_t;
 struct NamedSymbol {
   std::string name;
   SymbolType type;
@@ -116,13 +117,6 @@ struct FunctionEquals {
     return f1.address == f2.address;
   }
 };
-using Dependent = Function;
-using Address = uint64_t;
-using NonFunctionDependencies = std::vector<Address>;
-using FunctionDependencies = std::vector<Function>;
-using Dependencies = std::pair<FunctionDependencies, NonFunctionDependencies>;
-using DependencyMap =
-    std::unordered_map<Dependent, Dependencies, FunctionHasher, FunctionEquals>;
 
 struct ElfString {
   std::string value;
