@@ -6,6 +6,8 @@ Given 10 functions, each sized 6 bytes and a cache line of 5 bytes.<br>
 Running a single function will cause 2 icache misses, one for the first 5 bytes and the second for the last byte.<br>
 Using the default random function placement we get 20 icache misses for running these 10 functions.<br>
 But lets say these 10 functions are placed one after another, the new icache miss count goes down to 12 from 20.<br>
+![TuneFlow](https://github.com/user-attachments/assets/28bcec54-2e91-41d8-a7a3-fc8cdcbf4d5c)
+
 
 ### Algorithm explanation
 - Iterate text section symbols, mapping symbols to their dependency
