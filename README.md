@@ -27,7 +27,7 @@ else
 | Likely  | Unlikely |
 | ------------- | ------------- |
 | call   rand  | call   rand  |
-| test   eax,eax  | test   eax,eax  |
+| test   eax, eax  | test   eax, eax  |
 | je     skip exit  | jne    skip sleep  |
 | call   exit  | call   sleep  |
 | call   sleep  | call   exit  |
