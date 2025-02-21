@@ -1,7 +1,6 @@
 #include "dependency.hpp"
 #include "elf_header.hpp"
 #include "elf_reader.hpp"
-#include "status.hpp"
 #include <cstdlib>
 #include <cxxopts.hpp>
 #include <iostream>
@@ -84,8 +83,6 @@ int main(int argc, char *argv[]) {
         std::cout << line.instruction << " " << line.arguments << std::endl;
       }
     }
-  } catch (const CriticalException &exception) {
-    std::cout << exception.get() << std::endl;
   } catch (const std::exception &exception) {
     std::cout << "exception -> " << exception.what() << std::endl;
   }
