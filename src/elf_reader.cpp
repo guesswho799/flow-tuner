@@ -151,8 +151,8 @@ std::vector<Function> ElfReader::get_functions() const {
   };
 
   std::vector<Function> functions{};
-  for (const auto &symbol : _static_symbols | // std::views::take(100) |
-                                std::views::filter(function_filter)) {
+  for (const auto &symbol :
+       _static_symbols | std::views::filter(function_filter)) {
     const auto function_start = buffer.begin() + symbol.value - section_start;
     const auto function_end =
         buffer.begin() + symbol.value + symbol.size - section_start;
@@ -173,6 +173,27 @@ DependencyMap ElfReader::get_all_dependencies() const {
     disassembler.append_dependencies(result, function, functions);
   }
   return result;
+}
+
+void ElfReader::correct_addresses(
+    const DependencyMap &dependency_map,
+    std::vector<Function> &dependency_chain) const {
+
+  Disassembler disassembler;
+  const std::vector<Function> functions = get_functions();
+  uint64_t current_function_address =
+      get_section(code_section_name).loaded_virtual_address;
+
+  // apply new function address
+  for (Function &function : dependency_chain) {
+    function.address = current_function_address;
+    current_function_address += function.size;
+  }
+
+  // apply new dependency addresses
+  for (Function &function : dependency_chain) {
+    disassembler.correct_relative_address(function, dependency_map, dependency_chain);
+  }
 }
 
 std::vector<Disassembler::Line>

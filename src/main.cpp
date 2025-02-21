@@ -39,10 +39,11 @@ void recursive_function_chain(const DependencyMap &dependency_map,
 
   const auto dependencies = dependency_map.get_function_dependency(function);
 
-  for (const auto &dependency : dependencies) {
+  for (const auto &[_, dependency, __] : dependencies) {
     bool should_skip = false;
-    for (const auto& already_popped : out) {
-      if (already_popped.address == dependency.address) should_skip = true;
+    for (const auto &already_popped : out) {
+      if (already_popped.address == dependency.address)
+        should_skip = true;
     }
     if (should_skip)
       continue;
@@ -68,14 +69,25 @@ int main(int argc, char *argv[]) {
 
   try {
     ElfReader reader{input_file};
-    const auto dependency_map = reader.get_all_dependencies();
+    Disassembler disassembler;
     const auto start = reader.get_function("_start");
-    const auto dependency_chain = get_function_chain(dependency_map, start);
-    for (const auto &dependency : dependency_chain) {
-      std::cout << dependency.name << std::endl;
+    const auto dependency_map = reader.get_all_dependencies();
+    auto dependency_chain = get_function_chain(dependency_map, start);
+    reader.correct_addresses(dependency_map, dependency_chain);
+    for (const auto &function : dependency_chain) {
+      std::cout << "========================\n";
+      std::cout << function.name << " " << std::hex << function.address
+                << std::endl;
+      std::cout << "========================\n";
+      for (const auto &line :
+           disassembler.disassemble(function.opcodes, function.address)) {
+        std::cout << line.instruction << " " << line.arguments << std::endl;
+      }
     }
   } catch (const CriticalException &exception) {
     std::cout << exception.get() << std::endl;
+  } catch (const std::exception &exception) {
+    std::cout << "exception -> " << exception.what() << std::endl;
   }
 
   return 0;
