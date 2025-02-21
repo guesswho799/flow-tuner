@@ -1,6 +1,5 @@
 #include "disassembler.hpp"
 #include "elf_header.hpp"
-#include "status.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -21,7 +20,7 @@ Disassembler::~Disassembler() { cs_close(&_handle); }
 csh Disassembler::_get_handler() {
   csh handle;
   if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK)
-    throw Status::disassembler__open_failed;
+    throw std::runtime_error("Disassmebler open failed");
   return handle;
 }
 
@@ -34,7 +33,7 @@ Disassembler::disassemble(const std::vector<uint8_t> &input_buffer,
   const ssize_t count = cs_disasm(_handle, input_buffer.data(),
                                   input_buffer.size(), base_address, 0, &insn);
   if (count < 0)
-    throw Status::disassembler__parse_failed;
+    throw std::runtime_error("Disassmebler parse failed");
 
   std::vector<Disassembler::Line> result;
   auto buffer_iterator = input_buffer.begin();
@@ -234,7 +233,7 @@ void Disassembler::append_dependencies(
       cs_disasm(_handle, function.opcodes.data(), function.opcodes.size(),
                 function.address, 0, &insn);
   if (count < 0)
-    throw Status::disassembler__parse_failed;
+    throw std::runtime_error("Disassmebler parse failed");
 
   auto buffer_iterator = function.opcodes.begin();
 
@@ -314,7 +313,7 @@ void Disassembler::correct_relative_address(
       cs_disasm(_handle, function.opcodes.data(), function.opcodes.size(),
                 function.address, 0, &insn);
   if (count < 0)
-    throw Status::disassembler__parse_failed;
+    throw std::runtime_error("Disassmebler parse failed");
 
   auto buffer_iterator = function.opcodes.begin();
 

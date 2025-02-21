@@ -1,7 +1,6 @@
 #include "elf_reader.hpp"
 #include "disassembler.hpp"
 #include "elf_header.hpp"
-#include "status.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -12,6 +11,7 @@
 #include <locale>
 #include <ranges>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -72,7 +72,7 @@ ElfReader::get_section(const std::string_view &section_name) const {
     }
   }
 
-  throw CriticalException(Status::elf_header__section_not_found);
+  throw std::runtime_error(std::format("missing section: {}", section_name));
 }
 
 size_t
@@ -85,12 +85,12 @@ ElfReader::get_section_index(const std::string_view &section_name) const {
     index++;
   }
 
-  throw CriticalException(Status::elf_header__section_not_found);
+  throw std::runtime_error(std::format("missing section: {}", section_name));
 }
 
 NamedSection ElfReader::get_section(std::size_t section_index) const {
   if (_sections.size() < section_index) {
-    throw CriticalException(Status::elf_header__section_not_found);
+    throw std::runtime_error("section search out of bounds: " + section_index);
   }
 
   return _sections[section_index];
@@ -117,7 +117,7 @@ NamedSymbol ElfReader::get_symbol(std::string name) const {
   const auto iterator = std::find_if(_static_symbols.begin(),
                                      _static_symbols.end(), function_filter);
   if (iterator == _static_symbols.end())
-    throw CriticalException(Status::elf_header__function_not_found);
+    throw std::runtime_error("missing function: " + name);
 
   return *iterator;
 }
@@ -192,16 +192,16 @@ void ElfReader::correct_addresses(
 
   // apply new dependency addresses
   for (Function &function : dependency_chain) {
-    disassembler.correct_relative_address(function, dependency_map, dependency_chain);
+    disassembler.correct_relative_address(function, dependency_map,
+                                          dependency_chain);
   }
 }
 
 std::vector<Disassembler::Line>
 ElfReader::get_function_code(const NamedSymbol &function,
                              bool try_resolve) const {
-  if (!_file.is_open()) {
-    throw CriticalException(Status::elf_header__open_failed);
-  }
+  if (!_file.is_open())
+    throw std::runtime_error("binary open failed");
 
   const uint64_t offset =
       function.value + _sections[function.section_index].unloaded_offset -
@@ -226,9 +226,8 @@ ElfReader::get_function_code_by_name(std::string name) const {
 
 // factories
 ElfHeader ElfReader::header_factory() {
-  if (!_file.is_open()) {
-    throw CriticalException(Status::elf_header__open_failed);
-  }
+  if (!_file.is_open())
+    throw std::runtime_error("binary open failed");
 
   ElfHeader elf_header{};
   _file.read(reinterpret_cast<char *>(&elf_header), sizeof elf_header);
@@ -237,9 +236,8 @@ ElfHeader ElfReader::header_factory() {
 }
 
 std::vector<NamedSection> ElfReader::sections_factory() {
-  if (!_file.is_open()) {
-    throw CriticalException(Status::elf_header__open_failed);
-  }
+  if (!_file.is_open())
+    throw std::runtime_error("binary open failed");
 
   _file.seekg(static_cast<long>(_header.section_table_address));
 
@@ -270,9 +268,8 @@ std::vector<NamedSection> ElfReader::sections_factory() {
 std::vector<NamedSymbol>
 ElfReader::symbols_factory(const std::string_view &section_name,
                            const std::string_view &string_table_name) {
-  if (!_file.is_open()) {
-    throw CriticalException(Status::elf_header__open_failed);
-  }
+  if (!_file.is_open())
+    throw std::runtime_error("binary open failed");
 
   const NamedSection symbol_table = get_section(section_name);
 
@@ -300,9 +297,8 @@ ElfReader::symbols_factory(const std::string_view &section_name,
 }
 
 std::vector<NamedSymbol> ElfReader::fake_static_symbols_factory() {
-  if (!_file.is_open()) {
-    throw CriticalException(Status::elf_header__open_failed);
-  }
+  if (!_file.is_open())
+    throw std::runtime_error("binary open failed");
 
   const NamedSection code_section = get_section(code_section_name);
   _file.seekg(static_cast<long>(code_section.unloaded_offset));
@@ -365,9 +361,8 @@ std::vector<NamedSymbol> ElfReader::static_symbols_factory() {
 }
 
 std::vector<ElfString> ElfReader::strings_factory() {
-  if (!_file.is_open()) {
-    throw CriticalException(Status::elf_header__open_failed);
-  }
+  if (!_file.is_open())
+    throw std::runtime_error("binary open failed");
 
   const NamedSection string_section = get_section(".rodata");
   _file.seekg(static_cast<long>(string_section.unloaded_offset));
