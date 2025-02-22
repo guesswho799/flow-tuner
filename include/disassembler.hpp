@@ -54,30 +54,48 @@ private:
   static uint64_t _hex_to_decimal(const std::string &number);
   static bool _is_hex_number(const std::string &number);
   static std::string _remove_prefix(const std::string &s);
+  static bool _is_notrack(const std::string &s);
   static bool _is_call(const std::string &s);
   static bool _is_mov(const std::string &s);
+  static bool _is_movups(const std::string &s);
+  static bool _is_movq(const std::string &s);
   static bool _is_cmov(const std::string &s);
   static bool _is_load(const std::string &s);
   static bool _is_inc(const std::string &s);
   static bool _is_dec(const std::string &s);
   static bool _is_add(const std::string &s);
+  static bool _is_imul(const std::string &s);
+  static bool _is_xadd(const std::string &s);
   static bool _is_sub(const std::string &s);
   static bool _is_divss(const std::string &s);
   static bool _is_cmp(const std::string &s);
+  static bool _is_xchg(const std::string &s);
   static bool _is_ucomisd(const std::string &s);
+  static bool _is_and(const std::string &s);
   static bool _is_andpd(const std::string &s);
   static bool _is_pand(const std::string &s);
   static bool _is_fld(const std::string &s);
   static bool _is_or(const std::string &s);
+  static bool _is_test(const std::string &s);
   static bool _is_push(const std::string &s);
   static bool _is_relative_instruction(const std::string &argument);
   template <typename T>
-  static void _overwrite_end(T &buffer_iterator, uint16_t size,
-                             int64_t relative_address);
+  static void _overwrite_nop(T &buffer_iterator, uint16_t size);
   template <typename T>
-  static void _overwrite_jmp(T &buffer_iterator, int64_t relative_address);
+  static void _overwrite_end(T &buffer_iterator, int64_t relative_address,
+                             uint16_t size);
   template <typename T>
-  static void _overwrite_skip_two(T &buffer_iterator, int64_t relative_address);
+  static void _overwrite_jmp(T &buffer_iterator, int64_t relative_address,
+                             uint16_t size);
+  template <typename T>
+  static void _overwrite_cmp(T &buffer_iterator, const std::string &argument,
+                             int64_t relative_address, uint16_t size);
+  template <typename T>
+  static void _overwrite_mov(T &buffer_iterator, int64_t relative_address,
+                             uint16_t size);
+  template <typename T>
+  static void _overwrite_skip_two(T &buffer_iterator, int64_t relative_address,
+                                  uint16_t size);
   static std::vector<unsigned char> _number_to_opcodes(int64_t number);
 
   static std::variant<Address, Function>

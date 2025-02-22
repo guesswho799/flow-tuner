@@ -45,7 +45,7 @@ public:
   get_function_code_by_name(std::string name) const;
   DependencyMap get_all_dependencies() const;
   void correct_addresses(const DependencyMap &dependency_map,
-                                  std::vector<Function> &dependency_chain) const;
+                         std::vector<Function> &dependency_chain) const;
 
   // factories
 private:

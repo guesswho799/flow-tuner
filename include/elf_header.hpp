@@ -110,7 +110,9 @@ struct Function {
 };
 
 struct FunctionHasher {
-  size_t operator()(const Function &f) const { return std::hash<std::string>{}(f.name); }
+  size_t operator()(const Function &f) const {
+    return std::hash<std::string>{}(f.name);
+  }
 };
 struct FunctionEquals {
   bool operator()(const Function &f1, const Function &f2) const {
