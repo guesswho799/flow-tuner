@@ -7,6 +7,7 @@
 #include <elf.h>
 #include <format>
 #include <fstream>
+#include <iostream>
 #include <iterator>
 #include <locale>
 #include <ranges>

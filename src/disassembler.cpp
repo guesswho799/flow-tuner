@@ -123,7 +123,7 @@ std::string Disassembler::_resolve_string(const std::vector<ElfString> &strings,
 }
 
 int64_t Disassembler::get_address(const std::string &instruction_argument) {
-  const std::regex pattern(".*\\[rip ([\\+-]) (0x[0-9a-f]+)\\]");
+  const std::regex pattern(".*\\[rip ([\\+-]) (0x[0-9a-f]+)\\].*");
   std::smatch match;
   if (std::regex_match(instruction_argument, match, pattern)) {
     int64_t address = _hex_to_decimal(match[2].str());
@@ -156,12 +156,24 @@ bool Disassembler::_is_hex_number(const std::string &s) {
   return !s.empty() && it == s.end();
 }
 
+bool Disassembler::_is_notrack(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "notrack", 7);
+}
+
 bool Disassembler::_is_call(const std::string &s) {
   return 0 == strncmp(s.c_str(), "call", 4);
 }
 
 bool Disassembler::_is_mov(const std::string &s) {
   return 0 == strncmp(s.c_str(), "mov", 3);
+}
+
+bool Disassembler::_is_movups(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "movups", 6);
+}
+
+bool Disassembler::_is_movq(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "movq", 4);
 }
 
 bool Disassembler::_is_cmov(const std::string &s) {
@@ -184,6 +196,14 @@ bool Disassembler::_is_add(const std::string &s) {
   return 0 == strncmp(s.c_str(), "add", 3);
 }
 
+bool Disassembler::_is_imul(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "imul", 4);
+}
+
+bool Disassembler::_is_xadd(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "xadd", 4);
+}
+
 bool Disassembler::_is_sub(const std::string &s) {
   return 0 == strncmp(s.c_str(), "sub", 3);
 }
@@ -196,8 +216,16 @@ bool Disassembler::_is_cmp(const std::string &s) {
   return 0 == strncmp(s.c_str(), "cmp", 3);
 }
 
+bool Disassembler::_is_xchg(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "xchg", 4);
+}
+
 bool Disassembler::_is_ucomisd(const std::string &s) {
   return 0 == strncmp(s.c_str(), "ucomisd", 7);
+}
+
+bool Disassembler::_is_and(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "and", 3);
 }
 
 bool Disassembler::_is_andpd(const std::string &s) {
@@ -214,6 +242,10 @@ bool Disassembler::_is_fld(const std::string &s) {
 
 bool Disassembler::_is_or(const std::string &s) {
   return 0 == strncmp(s.c_str(), "or", 2);
+}
+
+bool Disassembler::_is_test(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "test", 4);
 }
 
 bool Disassembler::_is_push(const std::string &s) {
@@ -327,8 +359,6 @@ void Disassembler::correct_relative_address(
     const std::string operation = _remove_prefix(insn[i].mnemonic);
     const std::string argument = insn[i].op_str;
     int64_t relative_address = 0;
-    if (i == 11)
-      breakpoint();
 
     if (address_dependency.has_value()) {
       const auto [target_address, is_absolute] = address_dependency.value();
@@ -350,20 +380,32 @@ void Disassembler::correct_relative_address(
       }
 
     } else {
-      buffer_iterator += size;
+      // security jumps, getting next line to jump to from rodata section
+      // overwriting text section addresses in rodata would cause false
+      // positives
+      if (_is_notrack(operation)) {
+        _overwrite_nop(buffer_iterator, size);
+      } else {
+        buffer_iterator += size;
+      }
       continue;
     }
 
-    if (_is_call(operation) or _is_mov(operation) or _is_cmov(operation) or
-        _is_load(operation) or _is_inc(operation) or _is_dec(operation) or
-        _is_cmp(operation) or _is_ucomisd(operation) or _is_andpd(operation) or
-        _is_pand(operation) or _is_fld(operation) or _is_add(operation) or
-        _is_sub(operation) or _is_divss(operation) or _is_push(operation)) {
-      _overwrite_end(buffer_iterator, size, relative_address);
+    if (_is_call(operation) or _is_cmov(operation) or _is_load(operation) or
+        _is_inc(operation) or _is_dec(operation) or _is_ucomisd(operation) or
+        _is_andpd(operation) or _is_pand(operation) or _is_fld(operation) or
+        _is_add(operation) or _is_imul(operation) or _is_xadd(operation) or
+        _is_sub(operation) or _is_divss(operation) or _is_push(operation) or
+        _is_movq(operation) or _is_movups(operation)) {
+      _overwrite_end(buffer_iterator, relative_address, size);
+    } else if (_is_test(operation) or _is_and(operation)) {
+      _overwrite_skip_two(buffer_iterator, relative_address, size);
     } else if (_is_jump(operation)) {
-      _overwrite_jmp(buffer_iterator, relative_address);
-    } else if (_is_or(operation)) {
-      _overwrite_skip_two(buffer_iterator, relative_address);
+      _overwrite_jmp(buffer_iterator, relative_address, size);
+    } else if (_is_cmp(operation) or _is_xchg(operation)) {
+      _overwrite_cmp(buffer_iterator, argument, relative_address, size);
+    } else if (_is_mov(operation) or _is_or(operation)) {
+      _overwrite_mov(buffer_iterator, relative_address, size);
     } else {
       throw std::runtime_error("unsupported instruction in function " +
                                function.name + ": " + operation + " " +
@@ -382,10 +424,18 @@ std::string Disassembler::_remove_prefix(const std::string &s) {
 }
 
 template <typename T>
-void Disassembler::_overwrite_end(T &buffer_iterator, uint16_t size,
-                                  int64_t relative_address) {
-  const int amout_to_skip = size - 4;
-  buffer_iterator += amout_to_skip;
+void Disassembler::_overwrite_nop(T &buffer_iterator, uint16_t size) {
+  for (int i = 0; i < size; i++) {
+    *buffer_iterator = 0x90;
+    buffer_iterator++;
+  }
+}
+
+template <typename T>
+void Disassembler::_overwrite_end(T &buffer_iterator, int64_t relative_address,
+                                  uint16_t size) {
+  const int amount_to_skip = size - 4;
+  buffer_iterator += amount_to_skip;
   for (const auto &opcode : _number_to_opcodes(relative_address)) {
     *buffer_iterator = opcode;
     buffer_iterator++;
@@ -393,24 +443,61 @@ void Disassembler::_overwrite_end(T &buffer_iterator, uint16_t size,
 }
 
 template <typename T>
-void Disassembler::_overwrite_jmp(T &buffer_iterator,
-                                  int64_t relative_address) {
-  const int amout_to_skip = *buffer_iterator == 0x0f ? 2 : 1;
-  buffer_iterator += amout_to_skip;
+void Disassembler::_overwrite_jmp(T &buffer_iterator, int64_t relative_address,
+                                  uint16_t size) {
+  const int amount_to_skip = *buffer_iterator == 0x0f ? 2 : 1;
+  buffer_iterator += amount_to_skip;
   for (const auto &opcode : _number_to_opcodes(relative_address)) {
     *buffer_iterator = opcode;
     buffer_iterator++;
   }
+  const auto bytes_left = size - (amount_to_skip + 4);
+  buffer_iterator += bytes_left;
+}
+
+template <typename T>
+void Disassembler::_overwrite_cmp(T &buffer_iterator,
+                                  const std::string &argument,
+                                  int64_t relative_address, uint16_t size) {
+  const int amount_to_skip =
+      argument.find("qword") != std::string::npos ? 3 : 2;
+  buffer_iterator += amount_to_skip;
+  for (const auto &opcode : _number_to_opcodes(relative_address)) {
+    *buffer_iterator = opcode;
+    buffer_iterator++;
+  }
+  const auto bytes_left = size - (amount_to_skip + 4);
+  buffer_iterator += bytes_left;
+}
+
+template <typename T>
+void Disassembler::_overwrite_mov(T &buffer_iterator, int64_t relative_address,
+                                  uint16_t size) {
+  const int amount_to_skip = *buffer_iterator == 0x48 or * buffer_iterator ==
+                                     0x66 or * buffer_iterator ==
+                                     0x44 or * buffer_iterator == 0x4c
+                                 ? 3
+                                 : 2;
+  buffer_iterator += amount_to_skip;
+  for (const auto &opcode : _number_to_opcodes(relative_address)) {
+    *buffer_iterator = opcode;
+    buffer_iterator++;
+  }
+  const auto bytes_left = size - (amount_to_skip + 4);
+  buffer_iterator += bytes_left;
 }
 
 template <typename T>
 void Disassembler::_overwrite_skip_two(T &buffer_iterator,
-                                       int64_t relative_address) {
+                                       int64_t relative_address,
+                                       uint16_t size) {
   buffer_iterator += 2;
   for (const auto &opcode : _number_to_opcodes(relative_address)) {
     *buffer_iterator = opcode;
     buffer_iterator++;
   }
+  const auto bytes_left = size - 6;
+  buffer_iterator += bytes_left;
 }
 
 std::vector<unsigned char> Disassembler::_number_to_opcodes(int64_t number) {
