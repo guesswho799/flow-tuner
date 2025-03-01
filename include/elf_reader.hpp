@@ -49,13 +49,16 @@ public:
   void correct_addresses(const DependencyMap &dependency_map,
                          std::vector<Function> &dependency_chain) const;
   std::vector<ElfRelocation>
-  correct_plt(std::vector<Function> &dependency_chain) const;
+  correct_plt(const std::vector<Function> &dependency_chain) const;
+  std::vector<ElfSymbol>
+  correct_symtab(const std::vector<Function> &dependency_chain) const;
   std::vector<Function> get_rela_functions();
 
 public:
   void create_output_file(const std::string &output_file_name,
                           const std::vector<Function> &functions,
-                          std::vector<ElfRelocation> &&plt);
+                          std::vector<ElfRelocation> &&plt,
+                          std::vector<ElfSymbol> &&symtab);
 
   // factories
 private:
