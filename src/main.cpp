@@ -74,7 +74,8 @@ int main(int argc, char *argv[]) {
     auto dependency_chain = dependency_map.get_function_chain(start);
     reader.correct_addresses(dependency_map, dependency_chain);
     reader.create_output_file(output_file, dependency_chain,
-                              reader.correct_plt(dependency_chain));
+                              reader.correct_plt(dependency_chain),
+                              reader.correct_symtab(dependency_chain));
 
     // print_dependencies(dependency_chain, dependency_map);
     // print_text_section(dependency_chain, reader);

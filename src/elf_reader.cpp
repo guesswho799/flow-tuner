@@ -201,7 +201,7 @@ void ElfReader::correct_addresses(
   }
 }
 std::vector<ElfRelocation>
-ElfReader::correct_plt(std::vector<Function> &dependency_chain) const {
+ElfReader::correct_plt(const std::vector<Function> &dependency_chain) const {
   ElfRelocation relocation_info{};
   std::vector<ElfRelocation> result;
   const auto relocation_info_section =
@@ -236,6 +236,45 @@ ElfReader::correct_plt(std::vector<Function> &dependency_chain) const {
   }
 
   return result;
+}
+
+std::vector<ElfSymbol>
+ElfReader::correct_symtab(const std::vector<Function> &dependency_chain) const {
+  const NamedSection symbol_table = get_section(static_symbol_section_name);
+
+  _file.seekg(symbol_table.unloaded_offset);
+
+  std::vector<ElfSymbol> symbols{};
+  while (static_cast<uint64_t>(_file.tellg()) <
+         symbol_table.unloaded_offset + symbol_table.size) {
+    ElfSymbol symbol{};
+    _file.read(reinterpret_cast<char *>(&symbol), sizeof symbol);
+    symbols.push_back(symbol);
+  }
+
+  const NamedSection str_table = get_section(static_symbol_name_section_name);
+  std::vector<NamedSymbol> named_symbols{};
+  for (const auto &symbol : symbols) {
+    _file.seekg(str_table.unloaded_offset + symbol.name);
+    std::string name;
+    std::getline(_file, name, '\0');
+    named_symbols.emplace_back(name, static_cast<SymbolType>(symbol.type),
+                               symbol.section_index, symbol.value, symbol.size);
+  }
+
+  int counter = 0;
+  for (auto &symbol : named_symbols) {
+    const auto it =
+        std::find_if(dependency_chain.begin(), dependency_chain.end(),
+                     [&](const Function &s) { return s.name == symbol.name; });
+
+    if (it != dependency_chain.end())
+      symbols.at(counter).value = it->address;
+
+    counter++;
+  }
+
+  return symbols;
 }
 
 std::vector<Disassembler::Line>
@@ -431,7 +470,8 @@ std::vector<Function> ElfReader::get_rela_functions() {
 
 void ElfReader::create_output_file(const std::string &output_file_name,
                                    const std::vector<Function> &functions,
-                                   std::vector<ElfRelocation> &&plt) {
+                                   std::vector<ElfRelocation> &&plt,
+                                   std::vector<ElfSymbol> &&symtab) {
   auto writer =
       std::ofstream(output_file_name, std::ios::out | std::ios::binary);
   if (!_file.is_open())
@@ -445,7 +485,7 @@ void ElfReader::create_output_file(const std::string &output_file_name,
   writer.write(reinterpret_cast<char *>(&elf_header), sizeof elf_header);
 
   // copy until .rela.plt section
-  const auto plt_section = get_section(".rela.plt");
+  const auto plt_section = get_section(relocation_plt_symbol_info_section_name);
   const uint64_t plt_section_offset =
       plt_section.unloaded_offset - sizeof elf_header;
   std::vector<unsigned char> buffer(plt_section_offset);
@@ -459,7 +499,7 @@ void ElfReader::create_output_file(const std::string &output_file_name,
   writer.write(reinterpret_cast<char *>(plt.data()), plt_section.size);
 
   // copy until text section
-  const auto text = get_section(".text");
+  const auto text = get_section(code_section_name);
   const auto until_text_section =
       plt_section.unloaded_offset + plt_section.size;
   const uint64_t text_section_offset =
@@ -484,12 +524,26 @@ void ElfReader::create_output_file(const std::string &output_file_name,
   zeros.clear();
   zeros.shrink_to_fit();
 
+  // copy until symbol table
+  const auto symbol_section = get_section(static_symbol_section_name);
+  const auto already_wrote = text.unloaded_offset + text.size;
+  const uint64_t symtab_offset = symbol_section.unloaded_offset - already_wrote;
+  buffer.reserve(symtab_offset);
+  _file.seekg(static_cast<long>(symtab_offset));
+  _file.read(reinterpret_cast<char *>(buffer.data()), symtab_offset);
+  writer.write(reinterpret_cast<char *>(buffer.data()), symtab_offset);
+  buffer.clear();
+  buffer.shrink_to_fit();
+
+  // write new symbol table
+  writer.write(reinterpret_cast<char *>(symtab.data()), symbol_section.size);
+
   // copy after text section
   _file.seekg(0, std::ios::end);
   const auto file_size = _file.tellg();
-  const auto after_text_section = text.unloaded_offset + text.size;
-  buffer.resize(static_cast<uint64_t>(file_size) - after_text_section);
-  _file.seekg(static_cast<long>(after_text_section));
+  const auto after_last_section = symbol_section.unloaded_offset + symbol_section.size;
+  buffer.resize(static_cast<uint64_t>(file_size) - after_last_section);
+  _file.seekg(static_cast<long>(after_last_section));
   _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
   writer.write(reinterpret_cast<char *>(buffer.data()), buffer.size());
 }
