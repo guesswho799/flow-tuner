@@ -129,5 +129,9 @@ struct ElfRelocation {
   uint64_t file_offset;
   uint32_t dont_know;
   uint32_t symbol_index;
-  uint64_t extra_info;
+  uint64_t function_address;
 };
+
+// key: jump from
+// value: jump to
+using IndirectCall = std::unordered_map<Address, Address>;

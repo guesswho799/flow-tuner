@@ -1,5 +1,4 @@
 #include "dependency.hpp"
-#include <stdexcept>
 #include <utility>
 
 void DependencyMap::add_function_dependency(const Function &dependent,
@@ -8,6 +7,13 @@ void DependencyMap::add_function_dependency(const Function &dependent,
                                             bool is_absolute) {
   _function_dependency_map[dependent].emplace_back(in_function_index,
                                                    dependency, is_absolute);
+}
+
+void DependencyMap::add_function_dependency(const Function &dependent,
+                                            const Function &dependency) {
+  constexpr int dont_correct_callsite = 9999;
+  _function_dependency_map[dependent].emplace_back(dont_correct_callsite,
+                                                   dependency, false);
 }
 
 void DependencyMap::add_non_function_dependency(const Function &dependent,
@@ -31,7 +37,8 @@ DependencyMap::get_non_function_dependency(const Dependent &dependent) const {
   return _non_function_dependency_map.at(dependent);
 }
 
-std::optional<std::pair<Function, DependencyMap::IsAbsolute>> DependencyMap::get_function_dependency(
+std::optional<std::pair<Function, DependencyMap::IsAbsolute>>
+DependencyMap::get_function_dependency(
     const DependencyMap::Dependent &dependent,
     DependencyMap::LineNumber in_function_index) const {
   if (!has_function_dependency(dependent))
@@ -46,7 +53,8 @@ std::optional<std::pair<Function, DependencyMap::IsAbsolute>> DependencyMap::get
   return {};
 }
 
-std::optional<std::pair<Address, DependencyMap::IsAbsolute>> DependencyMap::get_non_function_dependency(
+std::optional<std::pair<Address, DependencyMap::IsAbsolute>>
+DependencyMap::get_non_function_dependency(
     const Dependent &dependent,
     DependencyMap::LineNumber in_function_index) const {
   if (!has_non_function_dependency(dependent))

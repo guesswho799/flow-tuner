@@ -41,11 +41,16 @@ public:
   get_symbol_dependencies(const Function &function) const;
   std::vector<Disassembler::Line> get_function_code(const NamedSymbol &function,
                                                     bool try_resolve) const;
+  std::vector<Disassembler::Line> get_code(uint64_t address, uint64_t size,
+                                           bool try_resolve) const;
   std::vector<Disassembler::Line>
   get_function_code_by_name(std::string name) const;
-  DependencyMap get_all_dependencies() const;
+  DependencyMap get_all_dependencies();
   void correct_addresses(const DependencyMap &dependency_map,
                          std::vector<Function> &dependency_chain) const;
+  std::vector<ElfRelocation>
+  correct_plt(std::vector<Function> &dependency_chain) const;
+  std::vector<Function> get_rela_functions();
 
   // factories
 private:
@@ -77,5 +82,4 @@ private:
   static constexpr std::string_view static_symbol_name_section_name = ".strtab";
   static constexpr std::string_view relocation_plt_symbol_info_section_name =
       ".rela.plt";
-  static constexpr std::string_view relocation_plt_section_name = ".plt.sec";
 };

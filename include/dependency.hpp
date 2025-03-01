@@ -19,6 +19,8 @@ public:
   void add_function_dependency(const Function &dependent,
                                const Function &dependency,
                                LineNumber in_function_index, bool is_absolute);
+  void add_function_dependency(const Function &dependent,
+                               const Function &dependency);
   void add_non_function_dependency(const Function &dependent,
                                    Address dependency,
                                    LineNumber in_function_index,

@@ -166,12 +166,18 @@ std::vector<Function> ElfReader::get_functions() const {
   return functions;
 }
 
-DependencyMap ElfReader::get_all_dependencies() const {
+DependencyMap ElfReader::get_all_dependencies() {
   DependencyMap result;
   Disassembler disassembler;
   const std::vector<Function> functions = get_functions();
+  const std::vector<Function> rela_functions = get_rela_functions();
   for (const auto &function : functions) {
     disassembler.append_dependencies(result, function, functions);
+    if (function.name == "__libc_start_main_impl") {
+      for (const auto &ifunc : rela_functions) {
+        result.add_function_dependency(function, ifunc);
+      }
+    }
   }
   return result;
 }
@@ -197,6 +203,43 @@ void ElfReader::correct_addresses(
                                           dependency_chain);
   }
 }
+std::vector<ElfRelocation>
+ElfReader::correct_plt(std::vector<Function> &dependency_chain) const {
+  ElfRelocation relocation_info{};
+  std::vector<ElfRelocation> result;
+  const auto relocation_info_section =
+      get_section(relocation_plt_symbol_info_section_name);
+  const std::vector<Function> functions = get_functions();
+
+  _file.seekg(static_cast<long>(relocation_info_section.unloaded_offset));
+
+  while (static_cast<uint64_t>(_file.tellg()) <
+         relocation_info_section.unloaded_offset +
+             relocation_info_section.size) {
+    _file.read(reinterpret_cast<char *>(&relocation_info),
+               sizeof relocation_info);
+    const auto old_function =
+        std::find_if(functions.begin(), functions.end(),
+                     [relocation_info](const Function &f) {
+                       return f.address == relocation_info.function_address;
+                     });
+    if (old_function == functions.end())
+      throw std::runtime_error("missing original rela function");
+
+    const auto new_function =
+        std::find_if(dependency_chain.begin(), dependency_chain.end(),
+                     [old_function](const Function &f) {
+                       return f.name == old_function->name;
+                     });
+    if (new_function == dependency_chain.end())
+      throw std::runtime_error("missing new rela function");
+
+    relocation_info.function_address = new_function->address;
+    result.push_back(relocation_info);
+  }
+
+  return result;
+}
 
 std::vector<Disassembler::Line>
 ElfReader::get_function_code(const NamedSymbol &function,
@@ -207,17 +250,21 @@ ElfReader::get_function_code(const NamedSymbol &function,
   const uint64_t offset =
       function.value + _sections[function.section_index].unloaded_offset -
       _sections[function.section_index].loaded_virtual_address;
-  _file.seekg(static_cast<long>(offset));
+  return get_code(offset, function.size, try_resolve);
+}
 
-  std::vector<unsigned char> buffer(function.size);
+std::vector<Disassembler::Line>
+ElfReader::get_code(uint64_t address, uint64_t size, bool try_resolve) const {
+  std::vector<unsigned char> buffer(size);
+  _file.seekg(static_cast<long>(address));
   _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
 
   Disassembler disassembler{};
   if (try_resolve)
-    return disassembler.disassemble(buffer, function.value,
-                                    get_static_symbols(), get_strings());
+    return disassembler.disassemble(buffer, address, get_static_symbols(),
+                                    get_strings());
   else
-    return disassembler.disassemble(buffer, function.value);
+    return disassembler.disassemble(buffer, address);
 }
 
 std::vector<Disassembler::Line>
@@ -361,6 +408,30 @@ std::vector<NamedSymbol> ElfReader::static_symbols_factory() {
   return fake_static_symbols_factory();
 }
 
+std::vector<Function> ElfReader::get_rela_functions() {
+  const auto functions = get_functions();
+  const auto relocation_info_section =
+      get_section(relocation_plt_symbol_info_section_name);
+  ElfRelocation relocation_info{};
+  std::vector<Function> rela_functions;
+
+  _file.seekg(static_cast<long>(relocation_info_section.unloaded_offset));
+  while (static_cast<uint64_t>(_file.tellg()) <
+         relocation_info_section.unloaded_offset +
+             relocation_info_section.size) {
+    _file.read(reinterpret_cast<char *>(&relocation_info),
+               sizeof relocation_info);
+    for (const auto &function : functions) {
+      if (function.address == relocation_info.function_address) {
+        rela_functions.emplace_back(function);
+        break;
+      }
+    }
+  }
+
+  return rela_functions;
+}
+
 std::vector<ElfString> ElfReader::strings_factory() {
   if (!_file.is_open())
     throw std::runtime_error("binary open failed");
@@ -373,8 +444,7 @@ std::vector<ElfString> ElfReader::strings_factory() {
     const auto address = static_cast<uint64_t>(_file.tellg());
     const auto value = get_next_string(string_section);
     if (_is_valid_string(value)) {
-      std::string v(value.begin(), value.end());
-      strings.emplace_back(v, address);
+      strings.emplace_back(std::string{value.begin(), value.end()}, address);
     }
   }
 

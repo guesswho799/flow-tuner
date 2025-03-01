@@ -59,6 +59,7 @@ private:
   static bool _is_mov(const std::string &s);
   static bool _is_movups(const std::string &s);
   static bool _is_movq(const std::string &s);
+  static bool _is_vmovdqa(const std::string &s);
   static bool _is_cmov(const std::string &s);
   static bool _is_load(const std::string &s);
   static bool _is_inc(const std::string &s);
