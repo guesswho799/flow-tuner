@@ -68,9 +68,10 @@ std::vector<Function> get_function_chain(const DependencyMap &dependency_map,
   return dependencies;
 }
 
-void create_output_file(const ElfReader &elf_reader, const std::string &input,
+void create_output_file(ElfReader &elf_reader, const std::string &input,
                         const std::string &output,
-                        const std::vector<Function> &functions) {
+                        const std::vector<Function> &functions,
+                        std::vector<ElfRelocation> &&plt) {
   auto reader = std::ifstream(input);
   auto writer = std::ofstream(output, std::ios::out | std::ios::binary);
   if (!reader.is_open())
@@ -83,13 +84,30 @@ void create_output_file(const ElfReader &elf_reader, const std::string &input,
   elf_header.entry_point_address = functions[0].address;
   writer.write(reinterpret_cast<char *>(&elf_header), sizeof elf_header);
 
-  // copy until text section
-  const auto text = elf_reader.get_section(".text");
-  const uint64_t text_section_offset = text.unloaded_offset - sizeof elf_header;
-  std::vector<unsigned char> buffer(text_section_offset);
+  // copy until .rela.plt section
+  const auto plt_section = elf_reader.get_section(".rela.plt");
+  const uint64_t plt_section_offset =
+      plt_section.unloaded_offset - sizeof elf_header;
+  std::vector<unsigned char> buffer(plt_section_offset);
   reader.seekg(static_cast<long>(sizeof elf_header));
   reader.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
   writer.write(reinterpret_cast<char *>(buffer.data()), buffer.size());
+  buffer.clear();
+  buffer.shrink_to_fit();
+
+  // write new rela plt section
+  writer.write(reinterpret_cast<char *>(plt.data()), plt_section.size);
+
+  // copy until text section
+  const auto text = elf_reader.get_section(".text");
+  const auto until_text_section =
+      plt_section.unloaded_offset + plt_section.size;
+  const uint64_t text_section_offset =
+      text.unloaded_offset - until_text_section;
+  buffer.reserve(text_section_offset);
+  reader.seekg(static_cast<long>(until_text_section));
+  reader.read(reinterpret_cast<char *>(buffer.data()), text_section_offset);
+  writer.write(reinterpret_cast<char *>(buffer.data()), text_section_offset);
   buffer.clear();
   buffer.shrink_to_fit();
 
@@ -158,7 +176,8 @@ int main(int argc, char *argv[]) {
     const auto dependency_map = reader.get_all_dependencies();
     auto dependency_chain = get_function_chain(dependency_map, start);
     reader.correct_addresses(dependency_map, dependency_chain);
-    create_output_file(reader, input_file, output_file, dependency_chain);
+    create_output_file(reader, input_file, output_file, dependency_chain,
+                       reader.correct_plt(dependency_chain));
 
     // print_dependencies(dependency_chain, dependency_map);
     // print_text_section(dependency_chain, reader);

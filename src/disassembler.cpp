@@ -176,6 +176,10 @@ bool Disassembler::_is_movq(const std::string &s) {
   return 0 == strncmp(s.c_str(), "movq", 4);
 }
 
+bool Disassembler::_is_vmovdqa(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "vmovdqa", 7);
+}
+
 bool Disassembler::_is_cmov(const std::string &s) {
   return 0 == strncmp(s.c_str(), "cmov", 4);
 }
@@ -396,7 +400,8 @@ void Disassembler::correct_relative_address(
         _is_andpd(operation) or _is_pand(operation) or _is_fld(operation) or
         _is_add(operation) or _is_imul(operation) or _is_xadd(operation) or
         _is_sub(operation) or _is_divss(operation) or _is_push(operation) or
-        _is_movq(operation) or _is_movups(operation)) {
+        _is_movq(operation) or _is_movups(operation) or
+        _is_vmovdqa(operation)) {
       _overwrite_end(buffer_iterator, relative_address, size);
     } else if (_is_test(operation) or _is_and(operation)) {
       _overwrite_skip_two(buffer_iterator, relative_address, size);
