@@ -8,10 +8,7 @@
 #include <format>
 #include <fstream>
 #include <iostream>
-#include <iterator>
-#include <locale>
 #include <ranges>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -430,6 +427,71 @@ std::vector<Function> ElfReader::get_rela_functions() {
   }
 
   return rela_functions;
+}
+
+void ElfReader::create_output_file(const std::string &output_file_name,
+                                   const std::vector<Function> &functions,
+                                   std::vector<ElfRelocation> &&plt) {
+  auto writer =
+      std::ofstream(output_file_name, std::ios::out | std::ios::binary);
+  if (!_file.is_open())
+    throw std::runtime_error("binary open failed");
+  if (!writer.is_open())
+    throw std::runtime_error("output open failed");
+
+  // overwrite entry address
+  ElfHeader elf_header = get_header();
+  elf_header.entry_point_address = functions[0].address;
+  writer.write(reinterpret_cast<char *>(&elf_header), sizeof elf_header);
+
+  // copy until .rela.plt section
+  const auto plt_section = get_section(".rela.plt");
+  const uint64_t plt_section_offset =
+      plt_section.unloaded_offset - sizeof elf_header;
+  std::vector<unsigned char> buffer(plt_section_offset);
+  _file.seekg(static_cast<long>(sizeof elf_header));
+  _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
+  writer.write(reinterpret_cast<char *>(buffer.data()), buffer.size());
+  buffer.clear();
+  buffer.shrink_to_fit();
+
+  // write new rela plt section
+  writer.write(reinterpret_cast<char *>(plt.data()), plt_section.size);
+
+  // copy until text section
+  const auto text = get_section(".text");
+  const auto until_text_section =
+      plt_section.unloaded_offset + plt_section.size;
+  const uint64_t text_section_offset =
+      text.unloaded_offset - until_text_section;
+  buffer.reserve(text_section_offset);
+  _file.seekg(static_cast<long>(until_text_section));
+  _file.read(reinterpret_cast<char *>(buffer.data()), text_section_offset);
+  writer.write(reinterpret_cast<char *>(buffer.data()), text_section_offset);
+  buffer.clear();
+  buffer.shrink_to_fit();
+
+  // write new text section
+  uint64_t new_text_section_size = 0;
+  for (const auto &function : functions) {
+    writer.write(reinterpret_cast<const char *>(function.opcodes.data()),
+                 function.opcodes.size());
+    new_text_section_size += function.opcodes.size();
+  }
+  const uint64_t missing_size = text.size - new_text_section_size;
+  std::vector<unsigned char> zeros(missing_size);
+  writer.write(reinterpret_cast<const char *>(zeros.data()), zeros.size());
+  zeros.clear();
+  zeros.shrink_to_fit();
+
+  // copy after text section
+  _file.seekg(0, std::ios::end);
+  const auto file_size = _file.tellg();
+  const auto after_text_section = text.unloaded_offset + text.size;
+  buffer.resize(static_cast<uint64_t>(file_size) - after_text_section);
+  _file.seekg(static_cast<long>(after_text_section));
+  _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
+  writer.write(reinterpret_cast<char *>(buffer.data()), buffer.size());
 }
 
 std::vector<ElfString> ElfReader::strings_factory() {

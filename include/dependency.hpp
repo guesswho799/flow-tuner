@@ -25,6 +25,7 @@ public:
                                    Address dependency,
                                    LineNumber in_function_index,
                                    bool is_absolute);
+  std::vector<Function> get_function_chain(const Function &first_function) const;
 
 public:
   auto begin() const;
@@ -41,6 +42,10 @@ public:
                               LineNumber in_function_index) const;
   bool has_function_dependency(const Dependent &dependent) const;
   bool has_non_function_dependency(const Dependent &dependent) const;
+
+private:
+  void _recursive_function_chain(const Function &function,
+                                 std::vector<Function> &out) const;
 
 private:
   std::unordered_map<Dependent, FunctionDependencies, FunctionHasher,

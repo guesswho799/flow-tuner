@@ -52,6 +52,11 @@ public:
   correct_plt(std::vector<Function> &dependency_chain) const;
   std::vector<Function> get_rela_functions();
 
+public:
+  void create_output_file(const std::string &output_file_name,
+                          const std::vector<Function> &functions,
+                          std::vector<ElfRelocation> &&plt);
+
   // factories
 private:
   ElfHeader header_factory();
