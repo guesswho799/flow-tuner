@@ -21,28 +21,30 @@ public:
   Disassembler();
   ~Disassembler();
 
-  std::vector<Line>
-  disassemble(const std::vector<uint8_t> &input_buffer, uint64_t base_address,
-              const std::vector<NamedSymbol> &static_symbols = {},
-              const std::vector<ElfString> &strings = {});
   static int64_t get_address(const std::string &instruction_argument);
   void append_dependencies(DependencyMap &dependency_map,
                            const Function &function,
-                           const std::vector<Function> &static_symbols);
+                           const std::vector<Function> &static_symbols,
+                           const std::vector<Function> &init_functions,
+                           const std::vector<Function> &fini_functions,
+                           const NamedSection &plt_section,
+                           const NamedSection &init_section,
+                           const NamedSection &init_array_section,
+                           const NamedSection &fini_array_section);
   void correct_relative_address(Function &function,
                                 const DependencyMap &dependency_map,
-                                const std::vector<Function> &static_symbols);
+                                const std::vector<Function> &static_symbols,
+                                const NamedSection &code_section);
 
 private:
   static void breakpoint();
-  static std::string
-  _generate_comment(const std::string &operation, const std::string &argument,
-                    uint64_t address,
-                    const std::vector<NamedSymbol> &static_symbols,
-                    const std::vector<ElfString> &strings);
 
-  static bool _is_absolute_instruction(const std::string &instruction_operation,
-                                       const std::string &instruction_argument);
+  static std::optional<int32_t>
+  _is_absolute_instruction(const std::string &instruction_operation,
+                           const std::string &instruction_argument,
+                           const std::vector<Function> &static_symbols,
+                           const NamedSection &plt_section,
+                           const NamedSection &init_section);
   static std::string
   _resolve_address(const std::vector<NamedSymbol> &static_symbols,
                    const std::vector<ElfString> &strings, uint64_t address);
@@ -58,7 +60,10 @@ private:
   static bool _is_call(const std::string &s);
   static bool _is_mov(const std::string &s);
   static bool _is_movups(const std::string &s);
+  static bool _is_movaps(const std::string &s);
   static bool _is_movq(const std::string &s);
+  static bool _is_movzx(const std::string &s);
+  static bool _is_movdqa(const std::string &s);
   static bool _is_vmovdqa(const std::string &s);
   static bool _is_cmov(const std::string &s);
   static bool _is_load(const std::string &s);
@@ -71,6 +76,7 @@ private:
   static bool _is_divss(const std::string &s);
   static bool _is_cmp(const std::string &s);
   static bool _is_xchg(const std::string &s);
+  static bool _is_cmpxchg(const std::string &s);
   static bool _is_ucomisd(const std::string &s);
   static bool _is_and(const std::string &s);
   static bool _is_andpd(const std::string &s);
@@ -101,7 +107,13 @@ private:
 
   static std::variant<Address, Function>
   _resolve_dependency(const std::vector<Function> &static_symbols,
-                      Address address);
+                      Address address, const NamedSection &init_array_section,
+                      const NamedSection &fini_array_section,
+                      const std::vector<Function> &init_functions,
+                      const std::vector<Function> &fini_functions);
+  static bool _is_indirect_function(Address address,
+                                    const NamedSection &init_array_section,
+                                    const NamedSection &fini_array_section);
   static bool _is_jump(const std::string &instruction);
 
 private:

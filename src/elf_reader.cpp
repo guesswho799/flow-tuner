@@ -110,7 +110,8 @@ std::vector<NamedSymbol> ElfReader::get_non_file_symbols() const {
 
 NamedSymbol ElfReader::get_symbol(std::string name) const {
   const auto function_filter = [&](const NamedSymbol &symbol) {
-    return symbol.type & SymbolType::function && symbol.name == name;
+    // return symbol.type & SymbolType::function && symbol.name == name;
+    return symbol.name == name;
   };
   const auto iterator = std::find_if(_static_symbols.begin(),
                                      _static_symbols.end(), function_filter);
@@ -168,11 +169,33 @@ DependencyMap ElfReader::get_all_dependencies() {
   Disassembler disassembler;
   const std::vector<Function> functions = get_functions();
   const std::vector<Function> rela_functions = get_rela_functions();
+  const std::vector<Function> init_functions =
+      get_functions_from_section(init_array_section_name);
+  const std::vector<Function> fini_functions =
+      get_functions_from_section(fini_array_section_name);
+  const auto plt_section = get_section(plt_section_name);
+  const auto init_section = get_section(init_section_name);
+  const auto init_array_section = get_section(init_array_section_name);
+  const auto fini_array_section = get_section(fini_array_section_name);
+  disassembler.append_dependencies(
+      result, init_functions[0], functions, init_functions, fini_functions,
+      plt_section, init_section, init_array_section, fini_array_section);
+  disassembler.append_dependencies(
+      result, fini_functions[0], functions, init_functions, fini_functions,
+      plt_section, init_section, init_array_section, fini_array_section);
   for (const auto &function : functions) {
-    disassembler.append_dependencies(result, function, functions);
+    disassembler.append_dependencies(
+        result, function, functions, init_functions, fini_functions,
+        plt_section, init_section, init_array_section, fini_array_section);
     if (function.name == "__libc_start_main_impl") {
       for (const auto &ifunc : rela_functions) {
         result.add_function_dependency(function, ifunc);
+      }
+      for (const auto &init_function : init_functions) {
+        result.add_function_dependency(function, init_function);
+      }
+      for (const auto &fini_function : fini_functions) {
+        result.add_function_dependency(function, fini_function);
       }
     }
   }
@@ -197,7 +220,8 @@ void ElfReader::correct_addresses(
   // apply new dependency addresses
   for (Function &function : dependency_chain) {
     disassembler.correct_relative_address(function, dependency_map,
-                                          dependency_chain);
+                                          dependency_chain,
+                                          get_section(code_section_name));
   }
 }
 std::vector<ElfRelocation>
@@ -229,7 +253,8 @@ ElfReader::correct_plt(const std::vector<Function> &dependency_chain) const {
                        return f.name == old_function->name;
                      });
     if (new_function == dependency_chain.end())
-      throw std::runtime_error("missing new rela function");
+      throw std::runtime_error("missing new rela function " +
+                               old_function->name);
 
     relocation_info.function_address = new_function->address;
     result.push_back(relocation_info);
@@ -263,13 +288,21 @@ ElfReader::correct_symtab(const std::vector<Function> &dependency_chain) const {
   }
 
   int counter = 0;
+  const auto functions = get_functions();
   for (auto &symbol : named_symbols) {
-    const auto it =
+    const auto used =
         std::find_if(dependency_chain.begin(), dependency_chain.end(),
                      [&](const Function &s) { return s.name == symbol.name; });
+    const auto is_function = std::find_if(functions.begin(), functions.end(),
+                                          [&](const Function &s) {
+                                            return s.name == symbol.name;
+                                          }) != functions.end();
 
-    if (it != dependency_chain.end())
-      symbols.at(counter).value = it->address;
+    if (used != dependency_chain.end())
+      symbols.at(counter).value = used->address;
+    else if (is_function) {
+      symbols.at(counter).value = 0;
+    }
 
     counter++;
   }
@@ -277,35 +310,53 @@ ElfReader::correct_symtab(const std::vector<Function> &dependency_chain) const {
   return symbols;
 }
 
-std::vector<Disassembler::Line>
-ElfReader::get_function_code(const NamedSymbol &function,
-                             bool try_resolve) const {
-  if (!_file.is_open())
-    throw std::runtime_error("binary open failed");
-
-  const uint64_t offset =
-      function.value + _sections[function.section_index].unloaded_offset -
-      _sections[function.section_index].loaded_virtual_address;
-  return get_code(offset, function.size, try_resolve);
+std::vector<Address> ElfReader::correct_init_array(
+    const std::vector<Function> &dependency_chain) const {
+  return _correct_array_section(dependency_chain, init_array_section_name);
 }
 
-std::vector<Disassembler::Line>
-ElfReader::get_code(uint64_t address, uint64_t size, bool try_resolve) const {
-  std::vector<unsigned char> buffer(size);
-  _file.seekg(static_cast<long>(address));
-  _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
-
-  Disassembler disassembler{};
-  if (try_resolve)
-    return disassembler.disassemble(buffer, address, get_static_symbols(),
-                                    get_strings());
-  else
-    return disassembler.disassemble(buffer, address);
+std::vector<Address> ElfReader::correct_fini_array(
+    const std::vector<Function> &dependency_chain) const {
+  return _correct_array_section(dependency_chain, fini_array_section_name);
 }
+std::vector<Address>
+ElfReader::_correct_array_section(const std::vector<Function> &dependency_chain,
+                                  const std::string_view &section_name) const {
+  std::vector<Address> addresses{};
+  const NamedSection section = get_section(section_name);
+  _file.seekg(section.unloaded_offset);
 
-std::vector<Disassembler::Line>
-ElfReader::get_function_code_by_name(std::string name) const {
-  return get_function_code(get_symbol(name), true);
+  while (static_cast<uint64_t>(_file.tellg()) <
+         section.unloaded_offset + section.size) {
+    Address address;
+    _file.read(reinterpret_cast<char *>(&address), sizeof address);
+    addresses.push_back(address);
+  }
+
+  const auto functions = get_functions();
+  for (auto &address : addresses) {
+    const auto function =
+        std::find_if(functions.begin(), functions.end(),
+                     [&](const Function &f) { return f.address == address; });
+
+    if (function == functions.end())
+      throw std::runtime_error(
+          "missing function from init_array in static symbols: " +
+          std::to_string(address));
+
+    const auto new_function = std::find_if(
+        dependency_chain.begin(), dependency_chain.end(),
+        [&](const Function &s) { return s.name == function->name; });
+
+    if (new_function == dependency_chain.end())
+      throw std::runtime_error(
+          "missing function from init_array in new dependency chain: " +
+          std::to_string(address));
+
+    address = new_function->address;
+  }
+
+  return addresses;
 }
 
 // factories
@@ -380,46 +431,6 @@ ElfReader::symbols_factory(const std::string_view &section_name,
   return named_symbols;
 }
 
-std::vector<NamedSymbol> ElfReader::fake_static_symbols_factory() {
-  if (!_file.is_open())
-    throw std::runtime_error("binary open failed");
-
-  const NamedSection code_section = get_section(code_section_name);
-  _file.seekg(static_cast<long>(code_section.unloaded_offset));
-
-  std::vector<unsigned char> buffer(code_section.size);
-  _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
-
-  Disassembler disassembler{};
-  const std::vector<Disassembler::Line> lines =
-      disassembler.disassemble(buffer, code_section.unloaded_offset);
-
-  const size_t section_index = get_section_index(code_section_name);
-  const uint64_t section_address = code_section.loaded_virtual_address;
-  const uint64_t entry_point = _header.entry_point_address;
-  constexpr SymbolType symbol_type = SymbolType::function;
-  std::vector<NamedSymbol> symbols{};
-  size_t section_offset = 0;
-  auto line = lines.begin();
-
-  while (line != lines.end()) {
-    const auto [amount_of_instructions, function_size] =
-        find_next_start_of_function(line, lines.end());
-    const uint64_t address = section_address + section_offset;
-    const std::string function_name =
-        address == entry_point ? "_start"
-                               : std::format("function_{:x}", address);
-
-    symbols.emplace_back(function_name, symbol_type, section_index, address,
-                         function_size);
-
-    section_offset += function_size;
-    line += amount_of_instructions;
-  }
-
-  return symbols;
-}
-
 template <typename It>
 std::pair<int, size_t> ElfReader::find_next_start_of_function(It begin,
                                                               It end) {
@@ -438,10 +449,8 @@ std::pair<int, size_t> ElfReader::find_next_start_of_function(It begin,
 }
 
 std::vector<NamedSymbol> ElfReader::static_symbols_factory() {
-  if (does_section_exist(static_symbol_section_name))
-    return symbols_factory(static_symbol_section_name,
-                           static_symbol_name_section_name);
-  return fake_static_symbols_factory();
+  return symbols_factory(static_symbol_section_name,
+                         static_symbol_name_section_name);
 }
 
 std::vector<Function> ElfReader::get_rela_functions() {
@@ -468,10 +477,50 @@ std::vector<Function> ElfReader::get_rela_functions() {
   return rela_functions;
 }
 
-void ElfReader::create_output_file(const std::string &output_file_name,
-                                   const std::vector<Function> &functions,
-                                   std::vector<ElfRelocation> &&plt,
-                                   std::vector<ElfSymbol> &&symtab) {
+std::vector<Function>
+ElfReader::get_functions_from_section(const std::string_view &section_name) {
+  const auto section = get_section(section_name);
+  const auto functions = get_functions();
+  std::vector<Function> result;
+  uint64_t address;
+
+  _file.seekg(static_cast<long>(section.unloaded_offset));
+  while (static_cast<uint64_t>(_file.tellg()) <
+         section.unloaded_offset + section.size) {
+    _file.read(reinterpret_cast<char *>(&address), sizeof(uint64_t));
+    for (const auto &function : functions) {
+      if (function.address == address) {
+        // because bug in gcc? missing size for first symbol in array
+        if (function.name == "__do_global_dtors_aux" or
+            function.name == "frame_dummy") {
+          const auto keep_offset = static_cast<uint64_t>(_file.tellg());
+          const auto function_size = 0x40;
+          const NamedSymbol symbol = get_symbol(function.name);
+          const uint64_t offset =
+              function.address +
+              _sections[symbol.section_index].unloaded_offset -
+              _sections[symbol.section_index].loaded_virtual_address;
+          _file.seekg(static_cast<long>(offset));
+          std::vector<unsigned char> buffer(function_size);
+          _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
+          result.emplace_back(function.name, function.address, function_size,
+                              buffer);
+          _file.seekg(static_cast<long>(keep_offset));
+        } else
+          result.emplace_back(function);
+        break;
+      }
+    }
+  }
+
+  return result;
+}
+
+void ElfReader::create_output_file(
+    const std::string &output_file_name, const std::vector<Function> &functions,
+    std::vector<ElfRelocation> &&plt, std::vector<ElfSymbol> &&symtab,
+    std::vector<Address> &&new_init_array_section,
+    std::vector<Address> &&new_fini_array_section) {
   auto writer =
       std::ofstream(output_file_name, std::ios::out | std::ios::binary);
   if (!_file.is_open())
@@ -524,12 +573,31 @@ void ElfReader::create_output_file(const std::string &output_file_name,
   zeros.clear();
   zeros.shrink_to_fit();
 
+  // copy until init array section
+  const auto init_array_section = get_section(init_array_section_name);
+  const auto fini_array_section = get_section(fini_array_section_name);
+  auto already_wrote = text.unloaded_offset + text.size;
+  const uint64_t array_offset =
+      init_array_section.unloaded_offset - already_wrote;
+  buffer.reserve(array_offset);
+  _file.seekg(static_cast<long>(already_wrote));
+  _file.read(reinterpret_cast<char *>(buffer.data()), array_offset);
+  writer.write(reinterpret_cast<char *>(buffer.data()), array_offset);
+  buffer.clear();
+  buffer.shrink_to_fit();
+
+  // write new init array section
+  writer.write(reinterpret_cast<char *>(new_init_array_section.data()),
+               init_array_section.size);
+  writer.write(reinterpret_cast<char *>(new_fini_array_section.data()),
+               fini_array_section.size);
+
   // copy until symbol table
   const auto symbol_section = get_section(static_symbol_section_name);
-  const auto already_wrote = text.unloaded_offset + text.size;
+  already_wrote = fini_array_section.unloaded_offset + fini_array_section.size;
   const uint64_t symtab_offset = symbol_section.unloaded_offset - already_wrote;
   buffer.reserve(symtab_offset);
-  _file.seekg(static_cast<long>(symtab_offset));
+  _file.seekg(static_cast<long>(already_wrote));
   _file.read(reinterpret_cast<char *>(buffer.data()), symtab_offset);
   writer.write(reinterpret_cast<char *>(buffer.data()), symtab_offset);
   buffer.clear();
@@ -541,7 +609,8 @@ void ElfReader::create_output_file(const std::string &output_file_name,
   // copy after text section
   _file.seekg(0, std::ios::end);
   const auto file_size = _file.tellg();
-  const auto after_last_section = symbol_section.unloaded_offset + symbol_section.size;
+  const auto after_last_section =
+      symbol_section.unloaded_offset + symbol_section.size;
   buffer.resize(static_cast<uint64_t>(file_size) - after_last_section);
   _file.seekg(static_cast<long>(after_last_section));
   _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());

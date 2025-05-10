@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <elf.h>
+#include <iostream>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -24,59 +25,31 @@ csh Disassembler::_get_handler() {
   return handle;
 }
 
-std::vector<Disassembler::Line>
-Disassembler::disassemble(const std::vector<uint8_t> &input_buffer,
-                          uint64_t base_address,
-                          const std::vector<NamedSymbol> &static_symbols,
-                          const std::vector<ElfString> &strings) {
-  cs_insn *insn;
-  const ssize_t count = cs_disasm(_handle, input_buffer.data(),
-                                  input_buffer.size(), base_address, 0, &insn);
-  if (count < 0)
-    throw std::runtime_error("Disassmebler parse failed");
+std::optional<int32_t> Disassembler::_is_absolute_instruction(
+    const std::string &operation, const std::string &argument,
+    const std::vector<Function> &static_symbols,
+    const NamedSection &plt_section, const NamedSection &init_section) {
+  if (!_is_call(operation) and !_is_jump(operation) and !_is_mov(operation))
+    return {};
+  if (!_is_hex_number(argument))
+    return {};
 
-  std::vector<Disassembler::Line> result;
-  auto buffer_iterator = input_buffer.begin();
-
-  for (int i = 0; i < count; i++) {
-
-    const uint16_t size = insn[i].size;
-    const uint64_t address = insn[i].address;
-    const std::string argument = insn[i].op_str;
-    const std::string operation = insn[i].mnemonic;
-
-    const uint64_t post_address = address + size;
-    const std::vector<unsigned char> opcodes(buffer_iterator,
-                                             buffer_iterator + size);
-    const std::string comment = _generate_comment(
-        operation, argument, post_address, static_symbols, strings);
-    const std::string full_argument = argument + comment;
-
-    result.emplace_back(opcodes, operation, full_argument, address);
-    buffer_iterator += size;
+  const auto dependency_address = _hex_to_decimal(argument);
+  if (dependency_address == init_section.loaded_virtual_address) {
+    return 0;
   }
-  cs_free(insn, count);
-  return result;
-}
-
-std::string
-Disassembler::_generate_comment(const std::string &operation,
-                                const std::string &argument, uint64_t address,
-                                const std::vector<NamedSymbol> &static_symbols,
-                                const std::vector<ElfString> &strings) {
-  if (_is_absolute_instruction(operation, argument))
-    return _resolve_symbol(static_symbols, _hex_to_decimal(argument));
-  else if (_is_load(operation))
-    return _resolve_address(static_symbols, strings,
-                            address + get_address(argument));
-  return "";
-}
-
-bool Disassembler::_is_absolute_instruction(const std::string &operation,
-                                            const std::string &argument) {
-  if (_is_call(operation) or _is_jump(operation) or _is_mov(operation))
-    return _is_hex_number(argument);
-  return false;
+  if (dependency_address >= plt_section.loaded_virtual_address and
+      dependency_address <
+          plt_section.loaded_virtual_address + plt_section.size) {
+    return dependency_address - plt_section.loaded_virtual_address;
+  }
+  for (const auto &function : static_symbols) {
+    if (dependency_address >= function.address and
+        dependency_address < function.address + function.size) {
+      return dependency_address - function.address;
+    }
+  }
+  return {};
 }
 
 std::string
@@ -172,8 +145,20 @@ bool Disassembler::_is_movups(const std::string &s) {
   return 0 == strncmp(s.c_str(), "movups", 6);
 }
 
+bool Disassembler::_is_movaps(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "movaps", 6);
+}
+
 bool Disassembler::_is_movq(const std::string &s) {
   return 0 == strncmp(s.c_str(), "movq", 4);
+}
+
+bool Disassembler::_is_movzx(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "movzx", 5);
+}
+
+bool Disassembler::_is_movdqa(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "movdqa", 6);
 }
 
 bool Disassembler::_is_vmovdqa(const std::string &s) {
@@ -224,6 +209,10 @@ bool Disassembler::_is_xchg(const std::string &s) {
   return 0 == strncmp(s.c_str(), "xchg", 4);
 }
 
+bool Disassembler::_is_cmpxchg(const std::string &s) {
+  return 0 == strncmp(s.c_str(), "cmpxchg", 7);
+}
+
 bool Disassembler::_is_ucomisd(const std::string &s) {
   return 0 == strncmp(s.c_str(), "ucomisd", 7);
 }
@@ -257,21 +246,23 @@ bool Disassembler::_is_push(const std::string &s) {
 }
 
 bool Disassembler::_is_relative_instruction(const std::string &argument) {
-  const std::regex pattern(".*\\[rip [\\+-] 0x[0-9a-f]+\\].*");
-  return std::regex_match(argument, pattern);
+  return argument.find("rip") != std::string::npos;
 }
 
 void Disassembler::append_dependencies(
     DependencyMap &dependency_map, const Function &function,
-    const std::vector<Function> &static_symbols) {
+    const std::vector<Function> &static_symbols,
+    const std::vector<Function> &init_functions,
+    const std::vector<Function> &fini_functions,
+    const NamedSection &plt_section, const NamedSection &init_section,
+    const NamedSection &init_array_section,
+    const NamedSection &fini_array_section) {
   cs_insn *insn;
   const ssize_t count =
       cs_disasm(_handle, function.opcodes.data(), function.opcodes.size(),
                 function.address, 0, &insn);
   if (count < 0)
     throw std::runtime_error("Disassmebler parse failed");
-
-  auto buffer_iterator = function.opcodes.begin();
 
   for (uint16_t i = 0; i < count; i++) {
 
@@ -280,42 +271,45 @@ void Disassembler::append_dependencies(
     const std::string argument = insn[i].op_str;
     const std::string operation = insn[i].mnemonic;
     const bool is_relative = _is_relative_instruction(argument);
-    const bool is_absolute = _is_absolute_instruction(operation, argument);
+    const auto is_absolute = _is_absolute_instruction(
+        operation, argument, static_symbols, plt_section, init_section);
     Address target_address = 0;
 
     if (is_relative) {
       target_address = address + size + get_address(argument);
-
-    } else if (is_absolute) {
+    } else if (is_absolute.has_value()) {
       target_address = _hex_to_decimal(argument);
+    } else {
+      continue;
     }
 
-    if (target_address) {
-      const std::variant<Address, Function> dependency =
-          _resolve_dependency(static_symbols, target_address);
-      const bool is_function = std::holds_alternative<Function>(dependency);
-      const bool is_address = std::holds_alternative<Address>(dependency);
+    const std::variant<Address, Function> dependency =
+        _resolve_dependency(static_symbols, target_address, init_array_section,
+                            fini_array_section, init_functions, fini_functions);
+    const bool is_function = std::holds_alternative<Function>(dependency);
+    const bool is_address = std::holds_alternative<Address>(dependency);
 
-      if (is_function) {
-        bool correct_as_absolute = is_absolute;
-        if (_is_call(operation))
-          correct_as_absolute = false;
+    const bool is_inside_dependency =
+        target_address > function.address and
+        target_address < function.address + function.size;
+    if (is_inside_dependency)
+      continue;
 
-        dependency_map.add_function_dependency(
-            function, std::get<Function>(dependency), i, correct_as_absolute);
-      } else if (is_address and is_relative) {
-        const Address dependency_address = std::get<Address>(dependency);
-        const bool is_outside_dependency =
-            dependency_address < function.address or
-            dependency_address > function.address + function.size;
-        if (is_outside_dependency) {
-          dependency_map.add_non_function_dependency(
-              function, dependency_address, i, is_absolute);
-        }
-      }
+    bool correct_as_absolute = is_absolute.has_value();
+    if (_is_call(operation) or _is_jump(operation))
+      correct_as_absolute = false;
+
+    if (is_function) {
+      const Function dep = std::get<Function>(dependency);
+      dependency_map.add_function_dependency(
+          function, dep, i, correct_as_absolute, is_absolute.value_or(0));
+    } else if (is_address) {
+      dependency_map.add_non_function_dependency(
+          function, std::get<Address>(dependency), i, correct_as_absolute);
+    } else {
+      throw std::runtime_error("unable to parse function: " + function.name +
+                               ", address: " + std::to_string(address));
     }
-
-    buffer_iterator += size;
   }
 
   cs_free(insn, count);
@@ -325,13 +319,47 @@ void Disassembler::breakpoint() {}
 
 std::variant<Address, Function>
 Disassembler::_resolve_dependency(const std::vector<Function> &static_symbols,
-                                  Address address) {
+                                  Address address,
+                                  const NamedSection &init_array_section,
+                                  const NamedSection &fini_array_section,
+                                  const std::vector<Function> &init_functions,
+                                  const std::vector<Function> &fini_functions) {
+  if (address >= init_array_section.loaded_virtual_address and
+      address <
+          init_array_section.loaded_virtual_address + init_array_section.size) {
+    return init_array_section.loaded_virtual_address;
+    // return init_functions[(address -
+    //                        init_array_section.loaded_virtual_address) /
+    //                       8]
+    //     .address;
+  }
+  if (address >= fini_array_section.loaded_virtual_address and
+      address <
+          fini_array_section.loaded_virtual_address + fini_array_section.size) {
+    return fini_array_section.loaded_virtual_address;
+    // return fini_functions[(address -
+    //                        fini_array_section.loaded_virtual_address) /
+    //                       8]
+    //     .address;
+  }
   for (const auto &function : static_symbols) {
-    if (function.address == address)
+    if (address >= function.address and
+        address < function.address + function.size)
       return function;
   }
 
   return address;
+}
+
+bool Disassembler::_is_indirect_function(
+    Address address, const NamedSection &init_array_section,
+    const NamedSection &fini_array_section) {
+  return (address >= init_array_section.loaded_virtual_address and
+          address < init_array_section.loaded_virtual_address +
+                        init_array_section.size) or
+         (address >= fini_array_section.loaded_virtual_address and
+          address < fini_array_section.loaded_virtual_address +
+                        fini_array_section.size);
 }
 
 bool Disassembler::_is_jump(const std::string &instruction) {
@@ -343,7 +371,8 @@ bool Disassembler::_is_jump(const std::string &instruction) {
 
 void Disassembler::correct_relative_address(
     Function &function, const DependencyMap &dependency_map,
-    const std::vector<Function> &static_symbols) {
+    const std::vector<Function> &static_symbols,
+    const NamedSection &code_section) {
   cs_insn *insn;
   const ssize_t count =
       cs_disasm(_handle, function.opcodes.data(), function.opcodes.size(),
@@ -372,13 +401,14 @@ void Disassembler::correct_relative_address(
         relative_address = target_address - (address + size);
 
     } else if (function_dependency.has_value()) {
-      const auto [target_function, is_absolute] = function_dependency.value();
+      const auto [target_function, is_absolute, offset] =
+          function_dependency.value();
       for (const auto &it : static_symbols) {
         if (it.name == target_function.name) {
           if (is_absolute)
-            relative_address = it.address;
+            relative_address = it.address + offset;
           else
-            relative_address = it.address - (address + size);
+            relative_address = it.address - (address + size) + offset;
           break;
         }
       }
@@ -398,23 +428,27 @@ void Disassembler::correct_relative_address(
     if (_is_call(operation) or _is_cmov(operation) or _is_load(operation) or
         _is_inc(operation) or _is_dec(operation) or _is_ucomisd(operation) or
         _is_andpd(operation) or _is_pand(operation) or _is_fld(operation) or
-        _is_add(operation) or _is_imul(operation) or _is_xadd(operation) or
-        _is_sub(operation) or _is_divss(operation) or _is_push(operation) or
-        _is_movq(operation) or _is_movups(operation) or
-        _is_vmovdqa(operation)) {
+        _is_imul(operation) or _is_xadd(operation) or _is_sub(operation) or
+        _is_divss(operation) or _is_push(operation) or _is_movq(operation) or
+        _is_movups(operation) or _is_movaps(operation) or
+        _is_vmovdqa(operation) or _is_movdqa(operation) or
+        _is_movzx(operation) or _is_cmpxchg(operation)) {
       _overwrite_end(buffer_iterator, relative_address, size);
     } else if (_is_test(operation) or _is_and(operation)) {
       _overwrite_skip_two(buffer_iterator, relative_address, size);
     } else if (_is_jump(operation)) {
       _overwrite_jmp(buffer_iterator, relative_address, size);
-    } else if (_is_cmp(operation) or _is_xchg(operation)) {
+    } else if (_is_cmp(operation) or _is_xchg(operation) or
+               _is_add(operation)) {
       _overwrite_cmp(buffer_iterator, argument, relative_address, size);
     } else if (_is_mov(operation) or _is_or(operation)) {
       _overwrite_mov(buffer_iterator, relative_address, size);
     } else {
-      throw std::runtime_error("unsupported instruction in function " +
-                               function.name + ": " + operation + " " +
-                               argument);
+      throw std::runtime_error(
+          "unsupported instruction in function " + function.name + ": " +
+          operation + " " + argument + ", address? " +
+          std::to_string(address_dependency.has_value()) + ", function? " +
+          std::to_string(function_dependency.has_value()));
     }
   }
 
@@ -478,11 +512,21 @@ void Disassembler::_overwrite_cmp(T &buffer_iterator,
 template <typename T>
 void Disassembler::_overwrite_mov(T &buffer_iterator, int64_t relative_address,
                                   uint16_t size) {
-  const int amount_to_skip = *buffer_iterator == 0x48 or * buffer_iterator ==
-                                     0x66 or * buffer_iterator ==
-                                     0x44 or * buffer_iterator == 0x4c
-                                 ? 3
-                                 : 2;
+  int amount_to_skip = 0;
+  switch (*buffer_iterator) {
+    case 0x48:
+    case 0x66:
+    case 0x44:
+    case 0x4c:
+      amount_to_skip = 3;
+    break;
+    case 0xb8:
+      amount_to_skip = 1;
+    break;
+    default:
+      amount_to_skip = 2;
+    break;
+  }
   buffer_iterator += amount_to_skip;
   for (const auto &opcode : _number_to_opcodes(relative_address)) {
     *buffer_iterator = opcode;

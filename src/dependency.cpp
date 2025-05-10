@@ -4,16 +4,17 @@
 void DependencyMap::add_function_dependency(const Function &dependent,
                                             const Function &dependency,
                                             LineNumber in_function_index,
-                                            bool is_absolute) {
-  _function_dependency_map[dependent].emplace_back(in_function_index,
-                                                   dependency, is_absolute);
+                                            bool is_absolute,
+                                            AddressOffset address_offset) {
+  _function_dependency_map[dependent].emplace_back(
+      in_function_index, dependency, is_absolute, address_offset);
 }
 
 void DependencyMap::add_function_dependency(const Function &dependent,
                                             const Function &dependency) {
   constexpr int dont_correct_callsite = 9999;
   _function_dependency_map[dependent].emplace_back(dont_correct_callsite,
-                                                   dependency, false);
+                                                   dependency, false, 0);
 }
 
 void DependencyMap::add_non_function_dependency(const Function &dependent,
@@ -37,7 +38,8 @@ DependencyMap::get_non_function_dependency(const Dependent &dependent) const {
   return _non_function_dependency_map.at(dependent);
 }
 
-std::optional<std::pair<Function, DependencyMap::IsAbsolute>>
+std::optional<std::tuple<Function, DependencyMap::IsAbsolute,
+                         DependencyMap::AddressOffset>>
 DependencyMap::get_function_dependency(
     const DependencyMap::Dependent &dependent,
     DependencyMap::LineNumber in_function_index) const {
@@ -45,9 +47,9 @@ DependencyMap::get_function_dependency(
     return {};
   const auto dependencies = _function_dependency_map.at(dependent);
 
-  for (const auto &[index, dependency, is_absolute] : dependencies) {
+  for (const auto &[index, dependency, is_absolute, offset] : dependencies) {
     if (index == in_function_index)
-      return std::make_pair(dependency, is_absolute);
+      return std::make_tuple(dependency, is_absolute, offset);
   }
 
   return {};
@@ -78,14 +80,14 @@ bool DependencyMap::has_non_function_dependency(
   return _non_function_dependency_map.contains(dependent);
 }
 
-void DependencyMap::_recursive_function_chain(const Function &function,
-                                              std::vector<Function> &out) const{
+void DependencyMap::_recursive_function_chain(
+    const Function &function, std::vector<Function> &out) const {
   if (!has_function_dependency(function))
     return;
 
   const auto dependencies = get_function_dependency(function);
 
-  for (const auto &[_, dependency, __] : dependencies) {
+  for (const auto &[_, dependency, __, ___] : dependencies) {
     bool should_skip = false;
     for (const auto &already_popped : out) {
       if (already_popped.address == dependency.address)
@@ -100,7 +102,7 @@ void DependencyMap::_recursive_function_chain(const Function &function,
 }
 
 std::vector<Function>
-DependencyMap::get_function_chain(const Function &first_function) const{
+DependencyMap::get_function_chain(const Function &first_function) const {
   std::vector<Function> dependencies;
   dependencies.push_back(first_function);
 

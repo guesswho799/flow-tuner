@@ -1,0 +1,10 @@
+b _start
+r
+set disassembly-flavor intel
+
+set $i = 0
+
+while $i == 0
+si
+end
+
