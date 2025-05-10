@@ -39,12 +39,6 @@ public:
   std::vector<Function> get_functions() const;
   std::vector<NamedSymbol>
   get_symbol_dependencies(const Function &function) const;
-  std::vector<Disassembler::Line> get_function_code(const NamedSymbol &function,
-                                                    bool try_resolve) const;
-  std::vector<Disassembler::Line> get_code(uint64_t address, uint64_t size,
-                                           bool try_resolve) const;
-  std::vector<Disassembler::Line>
-  get_function_code_by_name(std::string name) const;
   DependencyMap get_all_dependencies();
   void correct_addresses(const DependencyMap &dependency_map,
                          std::vector<Function> &dependency_chain) const;
@@ -52,13 +46,26 @@ public:
   correct_plt(const std::vector<Function> &dependency_chain) const;
   std::vector<ElfSymbol>
   correct_symtab(const std::vector<Function> &dependency_chain) const;
+  std::vector<Address>
+  correct_init_array(const std::vector<Function> &dependency_chain) const;
+  std::vector<Address>
+  correct_fini_array(const std::vector<Function> &dependency_chain) const;
   std::vector<Function> get_rela_functions();
+  std::vector<Function>
+  get_functions_from_section(const std::string_view &section_name);
+
+private:
+  std::vector<Address>
+  _correct_array_section(const std::vector<Function> &dependency_chain,
+                         const std::string_view &section_name) const;
 
 public:
   void create_output_file(const std::string &output_file_name,
                           const std::vector<Function> &functions,
                           std::vector<ElfRelocation> &&plt,
-                          std::vector<ElfSymbol> &&symtab);
+                          std::vector<ElfSymbol> &&symtab,
+                          std::vector<Address> &&new_init_array_section,
+                          std::vector<Address> &&new_fini_array_section);
 
   // factories
 private:
@@ -69,7 +76,6 @@ private:
                   const std::string_view &string_table_name);
   template <typename It>
   std::pair<int, size_t> find_next_start_of_function(It begin, It end);
-  std::vector<NamedSymbol> fake_static_symbols_factory();
   std::vector<NamedSymbol> static_symbols_factory();
   std::vector<ElfString> strings_factory();
   std::vector<char> get_next_string(const NamedSection &string_section);
@@ -90,4 +96,8 @@ private:
   static constexpr std::string_view static_symbol_name_section_name = ".strtab";
   static constexpr std::string_view relocation_plt_symbol_info_section_name =
       ".rela.plt";
+  static constexpr std::string_view plt_section_name = ".plt";
+  static constexpr std::string_view init_section_name = ".init";
+  static constexpr std::string_view init_array_section_name = ".init_array";
+  static constexpr std::string_view fini_array_section_name = ".fini_array";
 };
