@@ -25,16 +25,15 @@ public:
   void append_dependencies(DependencyMap &dependency_map,
                            const Function &function,
                            const std::vector<Function> &static_symbols,
-                           const std::vector<Function> &init_functions,
-                           const std::vector<Function> &fini_functions,
                            const NamedSection &plt_section,
                            const NamedSection &init_section,
                            const NamedSection &init_array_section,
                            const NamedSection &fini_array_section);
   void correct_relative_address(Function &function,
                                 const DependencyMap &dependency_map,
-                                const std::vector<Function> &static_symbols,
-                                const NamedSection &code_section);
+                                const std::vector<Function> &static_symbols);
+  std::vector<SwitchStatement>
+  get_switch_statements(const std::vector<Function> &functions);
 
 private:
   static void breakpoint();
@@ -108,9 +107,7 @@ private:
   static std::variant<Address, Function>
   _resolve_dependency(const std::vector<Function> &static_symbols,
                       Address address, const NamedSection &init_array_section,
-                      const NamedSection &fini_array_section,
-                      const std::vector<Function> &init_functions,
-                      const std::vector<Function> &fini_functions);
+                      const NamedSection &fini_array_section);
   static bool _is_indirect_function(Address address,
                                     const NamedSection &init_array_section,
                                     const NamedSection &fini_array_section);

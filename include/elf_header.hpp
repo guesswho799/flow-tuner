@@ -135,3 +135,9 @@ struct ElfRelocation {
 // key: jump from
 // value: jump to
 using IndirectCall = std::unordered_map<Address, Address>;
+
+struct SwitchStatement {
+  Address jump_from;
+  Address jump_table;
+  Function function;
+};

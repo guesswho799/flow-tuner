@@ -252,8 +252,6 @@ bool Disassembler::_is_relative_instruction(const std::string &argument) {
 void Disassembler::append_dependencies(
     DependencyMap &dependency_map, const Function &function,
     const std::vector<Function> &static_symbols,
-    const std::vector<Function> &init_functions,
-    const std::vector<Function> &fini_functions,
     const NamedSection &plt_section, const NamedSection &init_section,
     const NamedSection &init_array_section,
     const NamedSection &fini_array_section) {
@@ -283,9 +281,8 @@ void Disassembler::append_dependencies(
       continue;
     }
 
-    const std::variant<Address, Function> dependency =
-        _resolve_dependency(static_symbols, target_address, init_array_section,
-                            fini_array_section, init_functions, fini_functions);
+    const std::variant<Address, Function> dependency = _resolve_dependency(
+        static_symbols, target_address, init_array_section, fini_array_section);
     const bool is_function = std::holds_alternative<Function>(dependency);
     const bool is_address = std::holds_alternative<Address>(dependency);
 
@@ -321,26 +318,16 @@ std::variant<Address, Function>
 Disassembler::_resolve_dependency(const std::vector<Function> &static_symbols,
                                   Address address,
                                   const NamedSection &init_array_section,
-                                  const NamedSection &fini_array_section,
-                                  const std::vector<Function> &init_functions,
-                                  const std::vector<Function> &fini_functions) {
+                                  const NamedSection &fini_array_section) {
   if (address >= init_array_section.loaded_virtual_address and
       address <
           init_array_section.loaded_virtual_address + init_array_section.size) {
     return init_array_section.loaded_virtual_address;
-    // return init_functions[(address -
-    //                        init_array_section.loaded_virtual_address) /
-    //                       8]
-    //     .address;
   }
   if (address >= fini_array_section.loaded_virtual_address and
       address <
           fini_array_section.loaded_virtual_address + fini_array_section.size) {
     return fini_array_section.loaded_virtual_address;
-    // return fini_functions[(address -
-    //                        fini_array_section.loaded_virtual_address) /
-    //                       8]
-    //     .address;
   }
   for (const auto &function : static_symbols) {
     if (address >= function.address and
@@ -371,8 +358,7 @@ bool Disassembler::_is_jump(const std::string &instruction) {
 
 void Disassembler::correct_relative_address(
     Function &function, const DependencyMap &dependency_map,
-    const std::vector<Function> &static_symbols,
-    const NamedSection &code_section) {
+    const std::vector<Function> &static_symbols) {
   cs_insn *insn;
   const ssize_t count =
       cs_disasm(_handle, function.opcodes.data(), function.opcodes.size(),
@@ -408,20 +394,13 @@ void Disassembler::correct_relative_address(
           if (is_absolute)
             relative_address = it.address + offset;
           else
-            relative_address = it.address - (address + size) + offset;
+            relative_address = it.address - address + size + offset;
           break;
         }
       }
 
     } else {
-      // security jumps, getting next line to jump to from rodata section
-      // overwriting text section addresses in rodata would cause false
-      // positives
-      if (_is_notrack(operation)) {
-        _overwrite_nop(buffer_iterator, size);
-      } else {
-        buffer_iterator += size;
-      }
+      buffer_iterator += size;
       continue;
     }
 
@@ -453,6 +432,57 @@ void Disassembler::correct_relative_address(
   }
 
   cs_free(insn, count);
+}
+
+std::vector<SwitchStatement>
+Disassembler::get_switch_statements(const std::vector<Function> &functions) {
+  std::vector<SwitchStatement> switch_statements;
+  for (const Function &function : functions) {
+    cs_insn *insn;
+    const ssize_t count =
+        cs_disasm(_handle, function.opcodes.data(), function.opcodes.size(),
+                  function.address, 0, &insn);
+    if (count < 0)
+      throw std::runtime_error("Disassmebler parse failed");
+
+    for (uint16_t i = 0; i < count; i++) {
+      bool found_jump_table = false;
+      const uint16_t size = insn[i].size;
+      const uint64_t address = insn[i].address;
+      const std::string operation = insn[i].mnemonic;
+      const std::string argument = insn[i].op_str;
+      if (!operation.starts_with("notrack")) {
+        continue;
+      }
+
+      for (int backward_counter = i - 1;
+           backward_counter >= 0 and found_jump_table == false;
+           backward_counter--) {
+        const uint16_t previous_size = insn[backward_counter].size;
+        const std::string previous_operation = insn[backward_counter].mnemonic;
+        const std::string previous_argument = insn[backward_counter].op_str;
+        const uint64_t previous_address = insn[backward_counter].address;
+        if (previous_operation.starts_with("lea") and
+            previous_argument.find("rip") != std::string::npos) {
+          const auto jump_to =
+              previous_address + previous_size + get_address(previous_argument);
+          const auto jump_from = address + size;
+          switch_statements.emplace_back(jump_from, jump_to, function);
+          found_jump_table = true;
+        }
+      }
+      if (found_jump_table == false) {
+        std::stringstream ss;
+        ss << std::hex << address;
+        throw std::runtime_error("switch statement jump missing base jump "
+                                 "table address load instruction: " +
+                                 function.name + ", at address: 0x" + ss.str());
+      }
+    }
+    cs_free(insn, count);
+  }
+
+  return switch_statements;
 }
 
 std::string Disassembler::_remove_prefix(const std::string &s) {
@@ -514,17 +544,17 @@ void Disassembler::_overwrite_mov(T &buffer_iterator, int64_t relative_address,
                                   uint16_t size) {
   int amount_to_skip = 0;
   switch (*buffer_iterator) {
-    case 0x48:
-    case 0x66:
-    case 0x44:
-    case 0x4c:
-      amount_to_skip = 3;
+  case 0x48:
+  case 0x66:
+  case 0x44:
+  case 0x4c:
+    amount_to_skip = 3;
     break;
-    case 0xb8:
-      amount_to_skip = 1;
+  case 0xb8:
+    amount_to_skip = 1;
     break;
-    default:
-      amount_to_skip = 2;
+  default:
+    amount_to_skip = 2;
     break;
   }
   buffer_iterator += amount_to_skip;

@@ -73,6 +73,17 @@ ElfReader::get_section(const std::string_view &section_name) const {
   throw std::runtime_error(std::format("missing section: {}", section_name));
 }
 
+std::vector<unsigned char>
+ElfReader::get_section_data(const std::string_view &section_name) const {
+  const NamedSection section_info = get_section(section_name);
+  std::vector<unsigned char> section_data(section_info.size);
+  _file.seekg(static_cast<long>(section_info.unloaded_offset));
+  _file.read(reinterpret_cast<char *>(section_data.data()),
+             section_data.size());
+
+  return section_data;
+}
+
 size_t
 ElfReader::get_section_index(const std::string_view &section_name) const {
   size_t index = 0;
@@ -177,16 +188,16 @@ DependencyMap ElfReader::get_all_dependencies() {
   const auto init_section = get_section(init_section_name);
   const auto init_array_section = get_section(init_array_section_name);
   const auto fini_array_section = get_section(fini_array_section_name);
-  disassembler.append_dependencies(
-      result, init_functions[0], functions, init_functions, fini_functions,
-      plt_section, init_section, init_array_section, fini_array_section);
-  disassembler.append_dependencies(
-      result, fini_functions[0], functions, init_functions, fini_functions,
-      plt_section, init_section, init_array_section, fini_array_section);
+  disassembler.append_dependencies(result, init_functions[0], functions,
+                                   plt_section, init_section,
+                                   init_array_section, fini_array_section);
+  disassembler.append_dependencies(result, fini_functions[0], functions,
+                                   plt_section, init_section,
+                                   init_array_section, fini_array_section);
   for (const auto &function : functions) {
-    disassembler.append_dependencies(
-        result, function, functions, init_functions, fini_functions,
-        plt_section, init_section, init_array_section, fini_array_section);
+    disassembler.append_dependencies(result, function, functions, plt_section,
+                                     init_section, init_array_section,
+                                     fini_array_section);
     if (function.name == "__libc_start_main_impl") {
       for (const auto &ifunc : rela_functions) {
         result.add_function_dependency(function, ifunc);
@@ -220,8 +231,7 @@ void ElfReader::correct_addresses(
   // apply new dependency addresses
   for (Function &function : dependency_chain) {
     disassembler.correct_relative_address(function, dependency_map,
-                                          dependency_chain,
-                                          get_section(code_section_name));
+                                          dependency_chain);
   }
 }
 std::vector<ElfRelocation>
@@ -319,6 +329,7 @@ std::vector<Address> ElfReader::correct_fini_array(
     const std::vector<Function> &dependency_chain) const {
   return _correct_array_section(dependency_chain, fini_array_section_name);
 }
+
 std::vector<Address>
 ElfReader::_correct_array_section(const std::vector<Function> &dependency_chain,
                                   const std::string_view &section_name) const {
@@ -357,6 +368,75 @@ ElfReader::_correct_array_section(const std::vector<Function> &dependency_chain,
   }
 
   return addresses;
+}
+
+std::vector<unsigned char>
+ElfReader::correct_rodata(const std::vector<Function> &dependency_chain) const {
+  Disassembler disassembler;
+  const auto functions = get_functions();
+  const auto rodata_info = get_section(rodata_section_name);
+  auto rodata_bytes = get_section_data(rodata_section_name);
+  std::vector<SwitchStatement> switch_statements =
+      disassembler.get_switch_statements(functions);
+
+  for (std::size_t switch_counter = 0;
+       switch_counter < switch_statements.size(); switch_counter++) {
+    const SwitchStatement &switch_statement = switch_statements[switch_counter];
+    std::optional<std::size_t> start_of_next_table;
+    if (switch_counter != switch_statements.size() - 1) {
+      start_of_next_table = switch_statements[switch_counter + 1].jump_table;
+    }
+    const auto is_func = [&](const auto &new_function) {
+      return new_function.name == switch_statement.function.name;
+    };
+    const auto new_func =
+        std::find_if(dependency_chain.begin(), dependency_chain.end(), is_func);
+    if (new_func == dependency_chain.end()) {
+      continue;
+    }
+    const auto old_jump_offset =
+        switch_statement.jump_from - switch_statement.function.address;
+
+    bool should_stay = true;
+    int jump_table_index = 0;
+    for (; should_stay; jump_table_index++) {
+
+      uint32_t value = 0;
+      const uint32_t element_offset = switch_statement.jump_table -
+                                      rodata_info.loaded_virtual_address +
+                                      jump_table_index * sizeof(uint32_t);
+
+      if (element_offset + sizeof(uint32_t) > rodata_bytes.size() or
+          (start_of_next_table.has_value() and
+           start_of_next_table.value() == element_offset)) {
+        should_stay = false;
+        continue;
+      }
+      for (std::size_t counter = 0; counter < sizeof(uint32_t); counter++) {
+        value |= static_cast<uint32_t>(rodata_bytes[element_offset + counter])
+                 << (counter * 8);
+      }
+      const uint32_t old_destination_address =
+          value + switch_statement.jump_table;
+      if (old_destination_address > switch_statement.function.address +
+                                        switch_statement.function.size or
+          old_destination_address < switch_statement.function.address) {
+        continue;
+      }
+      const int offset = old_destination_address - switch_statement.jump_from;
+
+      const auto new_jump_address =
+          new_func->address + old_jump_offset + offset;
+      const uint32_t new_destination_address =
+          new_jump_address - switch_statement.jump_table;
+      for (std::size_t counter = 0; counter < sizeof(uint32_t); counter++) {
+        uint16_t end = (new_destination_address >> (counter * 8)) & 0xFF;
+        rodata_bytes[element_offset + counter] = end;
+      }
+    }
+  }
+
+  return rodata_bytes;
 }
 
 // factories
@@ -520,7 +600,8 @@ void ElfReader::create_output_file(
     const std::string &output_file_name, const std::vector<Function> &functions,
     std::vector<ElfRelocation> &&plt, std::vector<ElfSymbol> &&symtab,
     std::vector<Address> &&new_init_array_section,
-    std::vector<Address> &&new_fini_array_section) {
+    std::vector<Address> &&new_fini_array_section,
+    std::vector<unsigned char> &&new_rodata_section) {
   auto writer =
       std::ofstream(output_file_name, std::ios::out | std::ios::binary);
   if (!_file.is_open())
@@ -573,10 +654,25 @@ void ElfReader::create_output_file(
   zeros.clear();
   zeros.shrink_to_fit();
 
+  // copy until rodata section
+  const auto rodata_section = get_section(rodata_section_name);
+  auto already_wrote = text.unloaded_offset + text.size;
+  const uint64_t rodata_offset = rodata_section.unloaded_offset - already_wrote;
+  buffer.reserve(rodata_offset);
+  _file.seekg(static_cast<long>(already_wrote));
+  _file.read(reinterpret_cast<char *>(buffer.data()), rodata_offset);
+  writer.write(reinterpret_cast<char *>(buffer.data()), rodata_offset);
+  buffer.clear();
+  buffer.shrink_to_fit();
+
+  // write new rodata section
+  writer.write(reinterpret_cast<char *>(new_rodata_section.data()),
+               new_rodata_section.size());
+
   // copy until init array section
   const auto init_array_section = get_section(init_array_section_name);
   const auto fini_array_section = get_section(fini_array_section_name);
-  auto already_wrote = text.unloaded_offset + text.size;
+  already_wrote = rodata_section.unloaded_offset + rodata_section.size;
   const uint64_t array_offset =
       init_array_section.unloaded_offset - already_wrote;
   buffer.reserve(array_offset);
