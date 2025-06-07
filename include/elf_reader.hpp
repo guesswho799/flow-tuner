@@ -31,6 +31,7 @@ public:
   bool is_position_independent() const;
   bool does_section_exist(const std::string_view &section_name) const;
   NamedSection get_section(const std::string_view &section_name) const;
+  std::vector<unsigned char> get_section_data(const std::string_view &section_name) const;
   NamedSection get_section(std::size_t section_index) const;
   size_t get_section_index(const std::string_view &section_name) const;
   std::vector<NamedSymbol> get_non_file_symbols() const;
@@ -50,6 +51,8 @@ public:
   correct_init_array(const std::vector<Function> &dependency_chain) const;
   std::vector<Address>
   correct_fini_array(const std::vector<Function> &dependency_chain) const;
+  std::vector<unsigned char>
+  correct_rodata(const std::vector<Function> &dependency_chain) const;
   std::vector<Function> get_rela_functions();
   std::vector<Function>
   get_functions_from_section(const std::string_view &section_name);
@@ -65,7 +68,8 @@ public:
                           std::vector<ElfRelocation> &&plt,
                           std::vector<ElfSymbol> &&symtab,
                           std::vector<Address> &&new_init_array_section,
-                          std::vector<Address> &&new_fini_array_section);
+                          std::vector<Address> &&new_fini_array_section,
+                          std::vector<unsigned char> &&new_rodata_section);
 
   // factories
 private:
@@ -100,4 +104,5 @@ private:
   static constexpr std::string_view init_section_name = ".init";
   static constexpr std::string_view init_array_section_name = ".init_array";
   static constexpr std::string_view fini_array_section_name = ".fini_array";
+  static constexpr std::string_view rodata_section_name = ".rodata";
 };
