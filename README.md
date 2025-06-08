@@ -12,19 +12,20 @@
 
 ## Function order explanation
 
-Given 10 functions, each sized 6 bytes and a cache line of 5 bytes.<br>
-Running a single function will cause 2 icache misses, one for the first 5 bytes and the second for the last byte.<br>
+Given a function 6 bytes long and a cache line of 5 bytes.<br>
+Running it will cause 2 icache misses, one for the first 5 bytes and the second for the last byte.<br>
+Now imagine 10 functions,<br>
 Using the default random function placement we get 20 icache misses for running these 10 functions.<br>
-But lets say these 10 functions are placed one after another, the new icache miss count goes down to 12 from 20.<br>
+But if these 10 functions were placed one after another, the new icache miss count whould go down from 20 to 12.<br>
 ![TuneFlow](https://github.com/user-attachments/assets/28bcec54-2e91-41d8-a7a3-fc8cdcbf4d5c)
 
 
 ## Algorithm explanation
 
-- Iterate text section symbols, mapping symbols to their dependency
-- Iterate dependency map popping dependency chains in execution order
-- Resolving addresses according to new placement
-- Write out text section using popping order
+- Map functions to the functions they call
+- Reorder functions to execution order, starting from entry point
+- Update text section to new function order
+- Update new function address anywhere else (symbol table, plt, jump tables, etc)
 
 ## Branch prediction showcase
 
@@ -33,8 +34,8 @@ What if the first symbol the function calls is in a very unlikely branch (e.g. a
 Luckly, gcc is very good at branch predictions and places the most likely branch first.<br>
 Here is a simplified output of two compilations, one predicting exit and one predicting sleep.<br>
 ```c
-if (rand() != 0) [[un/likely]]
-    exit(1);
+if (rand()) [[un/likely]]
+    exit(0);
 else
     sleep(1);
 ```
@@ -59,7 +60,7 @@ FlowTuner reorders functions in the order they are used hence unused functions a
 gcc -static -O3 test/main.c -o test/program
 mkdir build && cd build
 cmake .. && make -j16
-./FlowTuner -i ../test/program -o outbinary
+./FlowTuner -i ../test/program -o a.out
 ```
 
 ## Dependencies
