@@ -48,11 +48,7 @@ void print_dependencies(const auto &dependency_chain,
 
 int main(int argc, char *argv[]) {
 
-  // const auto [input_file, output_file] = parse_args(argc, argv);
-  const auto input_file = "../test/return";
-  const auto output_file = "a.out";
-  if (argc == 0)
-    std::cout << argv;
+  const auto [input_file, output_file] = parse_args(argc, argv);
   std::cout << input_file << " " << output_file << std::endl;
 
   try {
