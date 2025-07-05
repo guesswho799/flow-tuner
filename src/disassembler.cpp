@@ -28,20 +28,22 @@ csh Disassembler::_get_handler() {
 std::optional<int32_t> Disassembler::_is_absolute_instruction(
     const std::string &operation, const std::string &argument,
     const std::vector<Function> &static_symbols,
-    const NamedSection &plt_section, const NamedSection &init_section) {
+    const NamedSection &plt_section) {
   if (!_is_call(operation) and !_is_jump(operation) and !_is_mov(operation))
     return {};
   if (!_is_hex_number(argument))
     return {};
 
   const auto dependency_address = _hex_to_decimal(argument);
-  if (dependency_address == init_section.loaded_virtual_address) {
-    return 0;
-  }
   if (dependency_address >= plt_section.loaded_virtual_address and
       dependency_address <
           plt_section.loaded_virtual_address + plt_section.size) {
     return dependency_address - plt_section.loaded_virtual_address;
+  }
+  for (const auto &function : static_symbols) {
+    if (dependency_address == function.address) {
+      return 0;
+    }
   }
   for (const auto &function : static_symbols) {
     if (dependency_address >= function.address and
@@ -252,8 +254,7 @@ bool Disassembler::_is_relative_instruction(const std::string &argument) {
 void Disassembler::append_dependencies(
     DependencyMap &dependency_map, const Function &function,
     const std::vector<Function> &static_symbols,
-    const NamedSection &plt_section, const NamedSection &init_section,
-    const NamedSection &init_array_section,
+    const NamedSection &plt_section, const NamedSection &init_array_section,
     const NamedSection &fini_array_section) {
   cs_insn *insn;
   const ssize_t count =
@@ -270,7 +271,7 @@ void Disassembler::append_dependencies(
     const std::string operation = insn[i].mnemonic;
     const bool is_relative = _is_relative_instruction(argument);
     const auto is_absolute = _is_absolute_instruction(
-        operation, argument, static_symbols, plt_section, init_section);
+        operation, argument, static_symbols, plt_section);
     Address target_address = 0;
 
     if (is_relative) {
@@ -312,8 +313,6 @@ void Disassembler::append_dependencies(
   cs_free(insn, count);
 }
 
-void Disassembler::breakpoint() {}
-
 std::variant<Address, Function>
 Disassembler::_resolve_dependency(const std::vector<Function> &static_symbols,
                                   Address address,
@@ -328,6 +327,11 @@ Disassembler::_resolve_dependency(const std::vector<Function> &static_symbols,
       address <
           fini_array_section.loaded_virtual_address + fini_array_section.size) {
     return fini_array_section.loaded_virtual_address;
+  }
+  for (const auto &function : static_symbols) {
+    if (address == function.address) {
+      return function;
+    }
   }
   for (const auto &function : static_symbols) {
     if (address >= function.address and
@@ -394,7 +398,7 @@ void Disassembler::correct_relative_address(
           if (is_absolute)
             relative_address = it.address + offset;
           else
-            relative_address = it.address - address + size + offset;
+            relative_address = it.address - (address + size) + offset;
           break;
         }
       }

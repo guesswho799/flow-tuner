@@ -26,7 +26,6 @@ public:
                            const Function &function,
                            const std::vector<Function> &static_symbols,
                            const NamedSection &plt_section,
-                           const NamedSection &init_section,
                            const NamedSection &init_array_section,
                            const NamedSection &fini_array_section);
   void correct_relative_address(Function &function,
@@ -36,14 +35,11 @@ public:
   get_switch_statements(const std::vector<Function> &functions);
 
 private:
-  static void breakpoint();
-
   static std::optional<int32_t>
   _is_absolute_instruction(const std::string &instruction_operation,
                            const std::string &instruction_argument,
                            const std::vector<Function> &static_symbols,
-                           const NamedSection &plt_section,
-                           const NamedSection &init_section);
+                           const NamedSection &plt_section);
   static std::string
   _resolve_address(const std::vector<NamedSymbol> &static_symbols,
                    const std::vector<ElfString> &strings, uint64_t address);
