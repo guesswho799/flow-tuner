@@ -2,6 +2,7 @@
 #include "elf_reader.hpp"
 #include <cstdlib>
 #include <cxxopts.hpp>
+#include <filesystem>
 #include <iostream>
 #include <stdlib.h>
 #include <string>
@@ -31,21 +32,6 @@ std::pair<std::string, std::string> parse_args(int argc, char *argv[]) {
                         result["output"].as<std::string>());
 }
 
-void print_dependencies(const auto &dependency_chain,
-                        const auto &dependency_map) {
-  for (const auto &function : dependency_chain) {
-    std::cout << function.name << ": ";
-    if (dependency_map.has_function_dependency(function)) {
-      const auto dependencies =
-          dependency_map.get_function_dependency(function);
-      for (const auto &[_, dependency, __, ___] : dependencies) {
-        std::cout << dependency.name << ", ";
-      }
-    }
-    std::cout << std::endl;
-  }
-}
-
 int main(int argc, char *argv[]) {
 
   const auto [input_file, output_file] = parse_args(argc, argv);
@@ -64,7 +50,10 @@ int main(int argc, char *argv[]) {
                               reader.correct_fini_array(dependency_chain),
                               reader.correct_rodata(dependency_chain));
 
-    // print_dependencies(dependency_chain, dependency_map);
+    std::filesystem::permissions(output_file,
+                                 std::filesystem::perms::owner_all |
+                                     std::filesystem::perms::group_all,
+                                 std::filesystem::perm_options::add);
 
   } catch (const std::exception &exception) {
     std::cout << "exception -> " << exception.what() << std::endl;

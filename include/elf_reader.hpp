@@ -31,7 +31,8 @@ public:
   bool is_position_independent() const;
   bool does_section_exist(const std::string_view &section_name) const;
   NamedSection get_section(const std::string_view &section_name) const;
-  std::vector<unsigned char> get_section_data(const std::string_view &section_name) const;
+  std::vector<unsigned char>
+  get_section_data(const std::string_view &section_name) const;
   NamedSection get_section(std::size_t section_index) const;
   size_t get_section_index(const std::string_view &section_name) const;
   std::vector<NamedSymbol> get_non_file_symbols() const;
@@ -55,7 +56,7 @@ public:
   correct_rodata(const std::vector<Function> &dependency_chain) const;
   std::vector<Function> get_rela_functions();
   std::vector<Function>
-  get_functions_from_section(const std::string_view &section_name);
+  get_functions_from_array_section(const std::string_view &section_name);
 
 private:
   std::vector<Address>
@@ -102,6 +103,7 @@ private:
       ".rela.plt";
   static constexpr std::string_view plt_section_name = ".plt";
   static constexpr std::string_view init_section_name = ".init";
+  static constexpr std::string_view fini_section_name = ".fini";
   static constexpr std::string_view init_array_section_name = ".init_array";
   static constexpr std::string_view fini_array_section_name = ".fini_array";
   static constexpr std::string_view rodata_section_name = ".rodata";

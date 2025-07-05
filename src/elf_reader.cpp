@@ -137,39 +137,50 @@ Function ElfReader::get_function(std::string name) const {
   const uint64_t offset =
       function.value + _sections[function.section_index].unloaded_offset -
       _sections[function.section_index].loaded_virtual_address;
+
+  // because bug in gcc? missing size
+  uint64_t actual_size = function.size;
+  if (name == "__do_global_dtors_aux" or name == "frame_dummy" or
+      name == "register_tm_clones" or name == "deregister_tm_clones") {
+    actual_size = 0x40;
+  } else if (name == "_fini") {
+    actual_size = 0xd;
+  } else if (name == "_init") {
+    actual_size = 0x1b;
+  } else if (name == "__restore_rt") {
+    actual_size = 0x9;
+  }
   _file.seekg(static_cast<long>(offset));
-  std::vector<unsigned char> buffer(function.size);
+  std::vector<unsigned char> buffer(actual_size);
   _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
 
   return {.name = function.name,
           .address = function.value,
-          .size = function.size,
+          .size = actual_size,
           .opcodes = buffer};
 }
 
 std::vector<Function> ElfReader::get_functions() const {
   const auto text_section = get_section(code_section_name);
-  const uint64_t section_start = text_section.loaded_virtual_address;
-  const uint64_t section_end = section_start + text_section.size;
-  std::vector<unsigned char> buffer(text_section.size);
-  _file.seekg(static_cast<long>(text_section.unloaded_offset));
-  _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
+  const auto init_section = get_section(init_section_name);
+  const auto fini_section = get_section(fini_section_name);
 
+  const auto is_in_section = [](const NamedSection &section,
+                                const NamedSymbol &symbol) {
+    return symbol.value >= section.loaded_virtual_address and
+           symbol.value + symbol.size <=
+               section.loaded_virtual_address + section.size;
+  };
   const auto function_filter = [&](const NamedSymbol &symbol) {
-    return symbol.value >= section_start and
-           symbol.value + symbol.size <= section_end;
+    return is_in_section(text_section, symbol) or
+           is_in_section(init_section, symbol) or
+           is_in_section(fini_section, symbol);
   };
 
   std::vector<Function> functions{};
   for (const auto &symbol :
        _static_symbols | std::views::filter(function_filter)) {
-    const auto function_start = buffer.begin() + symbol.value - section_start;
-    const auto function_end =
-        buffer.begin() + symbol.value + symbol.size - section_start;
-    functions.push_back({symbol.name,
-                         symbol.value,
-                         symbol.size,
-                         {function_start, function_end}});
+    functions.push_back(get_function(symbol.name));
   }
 
   return functions;
@@ -181,23 +192,15 @@ DependencyMap ElfReader::get_all_dependencies() {
   const std::vector<Function> functions = get_functions();
   const std::vector<Function> rela_functions = get_rela_functions();
   const std::vector<Function> init_functions =
-      get_functions_from_section(init_array_section_name);
+      get_functions_from_array_section(init_array_section_name);
   const std::vector<Function> fini_functions =
-      get_functions_from_section(fini_array_section_name);
+      get_functions_from_array_section(fini_array_section_name);
   const auto plt_section = get_section(plt_section_name);
-  const auto init_section = get_section(init_section_name);
   const auto init_array_section = get_section(init_array_section_name);
   const auto fini_array_section = get_section(fini_array_section_name);
-  disassembler.append_dependencies(result, init_functions[0], functions,
-                                   plt_section, init_section,
-                                   init_array_section, fini_array_section);
-  disassembler.append_dependencies(result, fini_functions[0], functions,
-                                   plt_section, init_section,
-                                   init_array_section, fini_array_section);
   for (const auto &function : functions) {
     disassembler.append_dependencies(result, function, functions, plt_section,
-                                     init_section, init_array_section,
-                                     fini_array_section);
+                                     init_array_section, fini_array_section);
     if (function.name == "__libc_start_main_impl") {
       for (const auto &ifunc : rela_functions) {
         result.add_function_dependency(function, ifunc);
@@ -557,8 +560,8 @@ std::vector<Function> ElfReader::get_rela_functions() {
   return rela_functions;
 }
 
-std::vector<Function>
-ElfReader::get_functions_from_section(const std::string_view &section_name) {
+std::vector<Function> ElfReader::get_functions_from_array_section(
+    const std::string_view &section_name) {
   const auto section = get_section(section_name);
   const auto functions = get_functions();
   std::vector<Function> result;
@@ -570,24 +573,7 @@ ElfReader::get_functions_from_section(const std::string_view &section_name) {
     _file.read(reinterpret_cast<char *>(&address), sizeof(uint64_t));
     for (const auto &function : functions) {
       if (function.address == address) {
-        // because bug in gcc? missing size for first symbol in array
-        if (function.name == "__do_global_dtors_aux" or
-            function.name == "frame_dummy") {
-          const auto keep_offset = static_cast<uint64_t>(_file.tellg());
-          const auto function_size = 0x40;
-          const NamedSymbol symbol = get_symbol(function.name);
-          const uint64_t offset =
-              function.address +
-              _sections[symbol.section_index].unloaded_offset -
-              _sections[symbol.section_index].loaded_virtual_address;
-          _file.seekg(static_cast<long>(offset));
-          std::vector<unsigned char> buffer(function_size);
-          _file.read(reinterpret_cast<char *>(buffer.data()), buffer.size());
-          result.emplace_back(function.name, function.address, function_size,
-                              buffer);
-          _file.seekg(static_cast<long>(keep_offset));
-        } else
-          result.emplace_back(function);
+        result.emplace_back(function);
         break;
       }
     }
