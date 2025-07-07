@@ -17,7 +17,10 @@ Running it will cause 2 icache misses, one for the first 5 bytes and the second 
 Now imagine 10 functions,<br>
 Using the default random function placement we get 20 icache misses for running these 10 functions.<br>
 But if these 10 functions were placed one after another, the new icache miss count whould go down from 20 to 12.<br>
-![TuneFlow](https://github.com/user-attachments/assets/28bcec54-2e91-41d8-a7a3-fc8cdcbf4d5c)
+![TuneFlow](https://github.com/user-attachments/assets/28bcec54-2e91-41d8-a7a3-fc8cdcbf4d5c)<br>
+This optimization would work better as an adaptive optimization, implemented in a jit compiler.<br>
+The compiler could count function calls,then reorder them at runtime acording to the hotest path.
+
 
 
 ## Algorithm explanation
