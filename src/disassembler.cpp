@@ -1,5 +1,6 @@
 #include "disassembler.hpp"
 #include "elf_header.hpp"
+#include "x86_64_instructions.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -29,7 +30,8 @@ std::optional<int32_t> Disassembler::_is_absolute_instruction(
     const std::string &operation, const std::string &argument,
     const std::vector<Function> &static_symbols,
     const NamedSection &plt_section) {
-  if (!_is_call(operation) and !_is_jump(operation) and !_is_mov(operation))
+  using namespace X86_64Instructions;
+  if (!is_call(operation) and !is_jump(operation) and !is_mov(operation))
     return {};
   if (!_is_hex_number(argument))
     return {};
@@ -131,122 +133,6 @@ bool Disassembler::_is_hex_number(const std::string &s) {
   return !s.empty() && it == s.end();
 }
 
-bool Disassembler::_is_notrack(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "notrack", 7);
-}
-
-bool Disassembler::_is_call(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "call", 4);
-}
-
-bool Disassembler::_is_mov(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "mov", 3);
-}
-
-bool Disassembler::_is_movups(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "movups", 6);
-}
-
-bool Disassembler::_is_movaps(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "movaps", 6);
-}
-
-bool Disassembler::_is_movq(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "movq", 4);
-}
-
-bool Disassembler::_is_movzx(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "movzx", 5);
-}
-
-bool Disassembler::_is_movdqa(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "movdqa", 6);
-}
-
-bool Disassembler::_is_vmovdqa(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "vmovdqa", 7);
-}
-
-bool Disassembler::_is_cmov(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "cmov", 4);
-}
-
-bool Disassembler::_is_load(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "lea", 3);
-}
-
-bool Disassembler::_is_inc(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "inc", 3);
-}
-
-bool Disassembler::_is_dec(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "dec", 3);
-}
-
-bool Disassembler::_is_add(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "add", 3);
-}
-
-bool Disassembler::_is_imul(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "imul", 4);
-}
-
-bool Disassembler::_is_xadd(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "xadd", 4);
-}
-
-bool Disassembler::_is_sub(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "sub", 3);
-}
-
-bool Disassembler::_is_divss(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "divss", 5);
-}
-
-bool Disassembler::_is_cmp(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "cmp", 3);
-}
-
-bool Disassembler::_is_xchg(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "xchg", 4);
-}
-
-bool Disassembler::_is_cmpxchg(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "cmpxchg", 7);
-}
-
-bool Disassembler::_is_ucomisd(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "ucomisd", 7);
-}
-
-bool Disassembler::_is_and(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "and", 3);
-}
-
-bool Disassembler::_is_andpd(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "andpd", 5);
-}
-
-bool Disassembler::_is_pand(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "pand", 4);
-}
-
-bool Disassembler::_is_fld(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "fld", 3);
-}
-
-bool Disassembler::_is_or(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "or", 2);
-}
-
-bool Disassembler::_is_test(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "test", 4);
-}
-
-bool Disassembler::_is_push(const std::string &s) {
-  return 0 == strncmp(s.c_str(), "push", 4);
-}
-
 bool Disassembler::_is_relative_instruction(const std::string &argument) {
   return argument.find("rip") != std::string::npos;
 }
@@ -294,7 +180,8 @@ void Disassembler::append_dependencies(
       continue;
 
     bool correct_as_absolute = is_absolute.has_value();
-    if (_is_call(operation) or _is_jump(operation))
+    using namespace X86_64Instructions;
+    if (is_call(operation) or is_jump(operation))
       correct_as_absolute = false;
 
     if (is_function) {
@@ -353,13 +240,6 @@ bool Disassembler::_is_indirect_function(
                         fini_array_section.size);
 }
 
-bool Disassembler::_is_jump(const std::string &instruction) {
-  std::vector<std::string_view> jump_values{"jmp", "jb", "je",  "jne",
-                                            "jg",  "jl", "jge", "jle"};
-  return std::find(jump_values.begin(), jump_values.end(), instruction) !=
-         jump_values.end();
-}
-
 void Disassembler::correct_relative_address(
     Function &function, const DependencyMap &dependency_map,
     const std::vector<Function> &static_symbols) {
@@ -408,31 +288,8 @@ void Disassembler::correct_relative_address(
       continue;
     }
 
-    if (_is_call(operation) or _is_cmov(operation) or _is_load(operation) or
-        _is_inc(operation) or _is_dec(operation) or _is_ucomisd(operation) or
-        _is_andpd(operation) or _is_pand(operation) or _is_fld(operation) or
-        _is_imul(operation) or _is_xadd(operation) or _is_sub(operation) or
-        _is_divss(operation) or _is_push(operation) or _is_movq(operation) or
-        _is_movups(operation) or _is_movaps(operation) or
-        _is_vmovdqa(operation) or _is_movdqa(operation) or
-        _is_movzx(operation) or _is_cmpxchg(operation)) {
-      _overwrite_end(buffer_iterator, relative_address, size);
-    } else if (_is_test(operation) or _is_and(operation)) {
-      _overwrite_skip_two(buffer_iterator, relative_address, size);
-    } else if (_is_jump(operation)) {
-      _overwrite_jmp(buffer_iterator, relative_address, size);
-    } else if (_is_cmp(operation) or _is_xchg(operation) or
-               _is_add(operation)) {
-      _overwrite_cmp(buffer_iterator, argument, relative_address, size);
-    } else if (_is_mov(operation) or _is_or(operation)) {
-      _overwrite_mov(buffer_iterator, relative_address, size);
-    } else {
-      throw std::runtime_error(
-          "unsupported instruction in function " + function.name + ": " +
-          operation + " " + argument + ", address? " +
-          std::to_string(address_dependency.has_value()) + ", function? " +
-          std::to_string(function_dependency.has_value()));
-    }
+    X86_64Instructions::overwrite_instruction(operation, buffer_iterator,
+                                              argument, relative_address, size);
   }
 
   cs_free(insn, count);
@@ -494,106 +351,4 @@ std::string Disassembler::_remove_prefix(const std::string &s) {
   if (s.starts_with(prefix))
     return s.substr(prefix.size());
   return s;
-}
-
-template <typename T>
-void Disassembler::_overwrite_nop(T &buffer_iterator, uint16_t size) {
-  for (int i = 0; i < size; i++) {
-    *buffer_iterator = 0x90;
-    buffer_iterator++;
-  }
-}
-
-template <typename T>
-void Disassembler::_overwrite_end(T &buffer_iterator, int64_t relative_address,
-                                  uint16_t size) {
-  const int amount_to_skip = size - 4;
-  buffer_iterator += amount_to_skip;
-  for (const auto &opcode : _number_to_opcodes(relative_address)) {
-    *buffer_iterator = opcode;
-    buffer_iterator++;
-  }
-}
-
-template <typename T>
-void Disassembler::_overwrite_jmp(T &buffer_iterator, int64_t relative_address,
-                                  uint16_t size) {
-  const int amount_to_skip = *buffer_iterator == 0x0f ? 2 : 1;
-  buffer_iterator += amount_to_skip;
-  for (const auto &opcode : _number_to_opcodes(relative_address)) {
-    *buffer_iterator = opcode;
-    buffer_iterator++;
-  }
-  const auto bytes_left = size - (amount_to_skip + 4);
-  buffer_iterator += bytes_left;
-}
-
-template <typename T>
-void Disassembler::_overwrite_cmp(T &buffer_iterator,
-                                  const std::string &argument,
-                                  int64_t relative_address, uint16_t size) {
-  const int amount_to_skip =
-      argument.find("qword") != std::string::npos ? 3 : 2;
-  buffer_iterator += amount_to_skip;
-  for (const auto &opcode : _number_to_opcodes(relative_address)) {
-    *buffer_iterator = opcode;
-    buffer_iterator++;
-  }
-  const auto bytes_left = size - (amount_to_skip + 4);
-  buffer_iterator += bytes_left;
-}
-
-template <typename T>
-void Disassembler::_overwrite_mov(T &buffer_iterator, int64_t relative_address,
-                                  uint16_t size) {
-  int amount_to_skip = 0;
-  switch (*buffer_iterator) {
-  case 0x48:
-  case 0x66:
-  case 0x44:
-  case 0x4c:
-    amount_to_skip = 3;
-    break;
-  case 0xb8:
-    amount_to_skip = 1;
-    break;
-  default:
-    amount_to_skip = 2;
-    break;
-  }
-  buffer_iterator += amount_to_skip;
-  for (const auto &opcode : _number_to_opcodes(relative_address)) {
-    *buffer_iterator = opcode;
-    buffer_iterator++;
-  }
-  const auto bytes_left = size - (amount_to_skip + 4);
-  buffer_iterator += bytes_left;
-}
-
-template <typename T>
-void Disassembler::_overwrite_skip_two(T &buffer_iterator,
-                                       int64_t relative_address,
-                                       uint16_t size) {
-  buffer_iterator += 2;
-  for (const auto &opcode : _number_to_opcodes(relative_address)) {
-    *buffer_iterator = opcode;
-    buffer_iterator++;
-  }
-  const auto bytes_left = size - 6;
-  buffer_iterator += bytes_left;
-}
-
-std::vector<unsigned char> Disassembler::_number_to_opcodes(int64_t number) {
-  const uint64_t mask = 0xFF;
-  const uint64_t jump_interval_in_bits = 8;
-  const uint64_t size_of_instruction_address = 4;
-  std::vector<uint8_t> result;
-  for (uint64_t i = 0; i < size_of_instruction_address; i++) {
-    const uint64_t current_mask = mask << (jump_interval_in_bits * i);
-    const unsigned char current_number = static_cast<unsigned char>(
-        (number & current_mask) >> (jump_interval_in_bits * i));
-    result.push_back(current_number);
-  }
-  result.shrink_to_fit();
-  return result;
 }
