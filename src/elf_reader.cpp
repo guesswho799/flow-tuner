@@ -119,9 +119,8 @@ std::vector<NamedSymbol> ElfReader::get_non_file_symbols() const {
   return symbols;
 }
 
-NamedSymbol ElfReader::get_symbol(std::string name) const {
+NamedSymbol ElfReader::get_symbol(const std::string& name) const {
   const auto function_filter = [&](const NamedSymbol &symbol) {
-    // return symbol.type & SymbolType::function && symbol.name == name;
     return symbol.name == name;
   };
   const auto iterator = std::find_if(_static_symbols.begin(),
@@ -132,13 +131,13 @@ NamedSymbol ElfReader::get_symbol(std::string name) const {
   return *iterator;
 }
 
-Function ElfReader::get_function(std::string name) const {
+Function ElfReader::get_function(const std::string& name) const {
   const auto function = get_symbol(name);
   const uint64_t offset =
       function.value + _sections[function.section_index].unloaded_offset -
       _sections[function.section_index].loaded_virtual_address;
 
-  // because bug in gcc? missing size
+  // because bug in gcc? sybols missing size, must set by hand
   uint64_t actual_size = function.size;
   if (name == "__do_global_dtors_aux" or name == "frame_dummy" or
       name == "register_tm_clones" or name == "deregister_tm_clones") {

@@ -51,35 +51,6 @@ private:
   static uint64_t _hex_to_decimal(const std::string &number);
   static bool _is_hex_number(const std::string &number);
   static std::string _remove_prefix(const std::string &s);
-  static bool _is_notrack(const std::string &s);
-  static bool _is_call(const std::string &s);
-  static bool _is_mov(const std::string &s);
-  static bool _is_movups(const std::string &s);
-  static bool _is_movaps(const std::string &s);
-  static bool _is_movq(const std::string &s);
-  static bool _is_movzx(const std::string &s);
-  static bool _is_movdqa(const std::string &s);
-  static bool _is_vmovdqa(const std::string &s);
-  static bool _is_cmov(const std::string &s);
-  static bool _is_load(const std::string &s);
-  static bool _is_inc(const std::string &s);
-  static bool _is_dec(const std::string &s);
-  static bool _is_add(const std::string &s);
-  static bool _is_imul(const std::string &s);
-  static bool _is_xadd(const std::string &s);
-  static bool _is_sub(const std::string &s);
-  static bool _is_divss(const std::string &s);
-  static bool _is_cmp(const std::string &s);
-  static bool _is_xchg(const std::string &s);
-  static bool _is_cmpxchg(const std::string &s);
-  static bool _is_ucomisd(const std::string &s);
-  static bool _is_and(const std::string &s);
-  static bool _is_andpd(const std::string &s);
-  static bool _is_pand(const std::string &s);
-  static bool _is_fld(const std::string &s);
-  static bool _is_or(const std::string &s);
-  static bool _is_test(const std::string &s);
-  static bool _is_push(const std::string &s);
   static bool _is_relative_instruction(const std::string &argument);
   template <typename T>
   static void _overwrite_nop(T &buffer_iterator, uint16_t size);
@@ -107,7 +78,6 @@ private:
   static bool _is_indirect_function(Address address,
                                     const NamedSection &init_array_section,
                                     const NamedSection &fini_array_section);
-  static bool _is_jump(const std::string &instruction);
 
 private:
   csh _get_handler();
