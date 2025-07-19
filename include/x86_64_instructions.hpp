@@ -136,16 +136,16 @@ static void overwrite_instruction(const std::string &operation,
       is_divss(operation) or is_push(operation) or is_movq(operation) or
       is_movups(operation) or is_movaps(operation) or is_vmovdqa(operation) or
       is_movdqa(operation) or is_movzx(operation) or is_cmpxchg(operation)) {
-    return overwrite_end(buffer_iterator, relative_address, size);
+    overwrite_end(buffer_iterator, relative_address, size);
 
   } else if (is_test(operation) or is_and(operation)) {
-    return overwrite_skip_two(buffer_iterator, relative_address, size);
+    overwrite_skip_two(buffer_iterator, relative_address, size);
   } else if (is_jump(operation)) {
-    return overwrite_jmp(buffer_iterator, relative_address, size);
+    overwrite_jmp(buffer_iterator, relative_address, size);
   } else if (is_cmp(operation) or is_xchg(operation) or is_add(operation)) {
-    return overwrite_cmp(buffer_iterator, argument, relative_address, size);
+    overwrite_cmp(buffer_iterator, argument, relative_address, size);
   } else if (is_mov(operation) or is_or(operation)) {
-    return overwrite_mov(buffer_iterator, relative_address, size);
+    overwrite_mov(buffer_iterator, relative_address, size);
   } else {
     throw std::runtime_error("unsupported instruction: " + operation + " " +
                              argument);
