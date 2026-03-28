@@ -57,13 +57,23 @@ the compilers look at the binary's library dependencies and just copy pastes the
 Meaning that if your code uses a single standalone function from a giant library, you will pay for more than you use.<br>
 FlowTuner reorders functions in the order they are used hence unused functions are omitted, resulting in a leaner executable.<br>
 
-## How to build
+## How to build and use
 
 ```console
 gcc -static -O3 test/main.c -o test/program
-mkdir build && cd build
-cmake .. && make -j16
-./FlowTuner -i ../test/program -o a.out
+cmake -Bbuild
+cmake --build build -j 8
+./build/FlowTuner -i test/program -o test/sorted
+
+time ./test/program
+real    0m3.034s
+user    0m3.026s
+sys     0m0.002s
+
+time ./test/sorted
+real    0m2.743s
+user    0m2.734s
+sys     0m0.004s
 ```
 
 ## Dependencies
