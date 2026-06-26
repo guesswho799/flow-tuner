@@ -60,7 +60,7 @@ FlowTuner reorders functions in the order they are used hence unused functions a
 ## How to build and use
 
 ```console
-gcc -static -O3 test/main.c -o test/program
+g++ -static -O3 test/main.cpp -o test/program
 cmake -Bbuild
 cmake --build build -j 8
 ./build/FlowTuner -i test/program -o test/sorted
